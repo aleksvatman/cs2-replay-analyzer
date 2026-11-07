@@ -105,6 +105,33 @@ async fn a_real_demo_is_parsed_into_the_reference_json() {
         "the server output differs from the reference JSON"
     );
 
+    // the same bytes come out of the HTTP route, compressed or not
+    let path = format!("/matches/{id}/data");
+    let plain = server::router(state.clone())
+        .oneshot(Request::get(&path).body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(plain.status(), StatusCode::OK);
+    let plain = plain.into_body().collect().await.unwrap().to_bytes();
+    assert!(
+        plain == reference,
+        "GET /data (plain) differs from the reference JSON"
+    );
+    let zipped = server::router(state.clone())
+        .oneshot(
+            Request::get(&path)
+                .header("accept-encoding", "gzip")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let zipped = zipped.into_body().collect().await.unwrap().to_bytes();
+    assert!(
+        gunzip(&zipped) == reference,
+        "GET /data (gzip) differs from the reference JSON"
+    );
+
     // no temporary files are left behind
     let mut files: Vec<_> = std::fs::read_dir(state.storage.dir(&id).unwrap())
         .unwrap()

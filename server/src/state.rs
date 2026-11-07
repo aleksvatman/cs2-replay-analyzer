@@ -8,7 +8,7 @@ use tokio::sync::{Mutex, Semaphore};
 use crate::config::Config;
 use crate::jobs::{Jobs, Runner};
 use crate::limits::RateLimiter;
-use crate::storage::Storage;
+use crate::storage::{Recovery, Storage, StorageError};
 
 #[derive(Clone, Debug)]
 pub struct AppState {
@@ -24,6 +24,17 @@ pub struct AppState {
 }
 
 impl AppState {
+    /// Startup scan of the data directory: removes unfinished uploads, settles interrupted
+    /// matches and puts the ones that still have their demo back into the parse queue.
+    /// Must be called inside the tokio runtime.
+    pub fn recover_and_resume(&self) -> Result<Recovery, StorageError> {
+        let recovery = self.storage.recover()?;
+        for id in recovery.requeue.iter().cloned() {
+            self.jobs.resume(id);
+        }
+        Ok(recovery)
+    }
+
     /// Opens the storage in `config.data_dir` (creating it if needed) and sets up the parse
     /// queue with the real parser.
     pub fn new(config: Config) -> io::Result<AppState> {
