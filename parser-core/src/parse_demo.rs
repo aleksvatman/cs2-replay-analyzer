@@ -10,7 +10,6 @@ use crate::models::{
 };
 use crate::models::{Match, Player, Team, SCHEMA_VERSION};
 use ahash::AHashMap;
-use memmap2::MmapOptions;
 use parser::first_pass::parser_settings::ParserInputs;
 use parser::parse_demo::{Parser, ParsingMode};
 use parser::first_pass::prop_controller::{
@@ -20,16 +19,11 @@ use parser::first_pass::prop_controller::{
 use parser::second_pass::parser_settings::create_huffman_lookup_table;
 use parser::second_pass::variants::{PropColumn, VarVec};
 use std::collections::BTreeMap;
-use std::fs::File;
-use std::path::Path;
 
 const DEFAULT_TICK_RATE: u32 = 64;
 
 /// Reads only the demo header (map name etc.).
-pub fn read_header(path: &Path) -> Result<BTreeMap<String, String>, ParseError> {
-    let file = File::open(path)?;
-    // Safety: the file is treated as read-only and must not be modified while parsing.
-    let mmap = unsafe { MmapOptions::new().map(&file)? };
+pub fn read_header(data: &[u8]) -> Result<BTreeMap<String, String>, ParseError> {
     let huf = create_huffman_lookup_table();
     let inputs = ParserInputs {
         real_name_to_og_name: AHashMap::default(),
@@ -52,7 +46,7 @@ pub fn read_header(path: &Path) -> Result<BTreeMap<String, String>, ParseError> 
     };
     let mut parser = Parser::new(inputs, ParsingMode::ForceSingleThreaded);
     let out = parser
-        .parse_demo(&mmap)
+        .parse_demo(data)
         .map_err(|e| ParseError::Demo(format!("{e:?}")))?;
     Ok(out.header.unwrap_or_default().into_iter().collect())
 }
@@ -83,10 +77,12 @@ fn steam_field(e: &Ev, name: &str) -> Option<u64> {
     }
 }
 
-fn str_field(e: &Ev, name: &str) -> String {
-    match field(e, name) {
-        Some(parser::second_pass::variants::Variant::String(s)) => s.clone(),
-        _ => String::new(),
+/// Weapon name of an event; damage without one (e.g. the bomb blast) becomes "unknown" so the
+/// weapon dictionary never holds an empty name.
+fn weapon_field(e: &Ev) -> String {
+    match field(e, "weapon") {
+        Some(parser::second_pass::variants::Variant::String(s)) if !s.is_empty() => s.clone(),
+        _ => "unknown".to_string(),
     }
 }
 
@@ -124,7 +120,7 @@ fn match_event(e: &Ev) -> Option<MatchEvent> {
                 victim: user?,
                 killer: steam_field(e, "attacker_steamid"),
                 assister: steam_field(e, "assister_steamid"),
-                weapon: str_field(e, "weapon"),
+                weapon: weapon_field(e),
                 flags,
             }
         }
@@ -132,7 +128,7 @@ fn match_event(e: &Ev) -> Option<MatchEvent> {
             tick,
             victim: user?,
             attacker: steam_field(e, "attacker_steamid"),
-            weapon: str_field(e, "weapon"),
+            weapon: weapon_field(e),
             dmg: int_field(e, "dmg_health").unwrap_or(0).max(0) as u32,
             armor: int_field(e, "dmg_armor").unwrap_or(0).max(0) as u32,
             hp_after: int_field(e, "health").unwrap_or(0).max(0) as u32,
@@ -192,15 +188,12 @@ fn round_event(e: &parser::second_pass::game_events::GameEvent) -> Option<RoundE
 }
 
 /// Cheap pass: map, player roster and rounds (start/end/winner), without snapshots.
-pub fn read_match_info(path: &Path) -> Result<Match, ParseError> {
-    read_events_pass(path).map(|(m, _)| m)
+pub fn read_match_info(data: &[u8]) -> Result<Match, ParseError> {
+    read_events_pass(data).map(|(m, _)| m)
 }
 
 /// Pass 1: header, roster, rounds and the replay events.
-fn read_events_pass(path: &Path) -> Result<(Match, Vec<MatchEvent>), ParseError> {
-    let file = File::open(path)?;
-    // Safety: read-only mapping, the file must not change while parsing.
-    let mmap = unsafe { MmapOptions::new().map(&file)? };
+fn read_events_pass(data: &[u8]) -> Result<(Match, Vec<MatchEvent>), ParseError> {
     let huf = create_huffman_lookup_table();
     let inputs = ParserInputs {
         real_name_to_og_name: AHashMap::default(),
@@ -222,7 +215,7 @@ fn read_events_pass(path: &Path) -> Result<(Match, Vec<MatchEvent>), ParseError>
         fallback_bytes: None,
     };
     let out = Parser::new(inputs, ParsingMode::ForceSingleThreaded)
-        .parse_demo(&mmap)
+        .parse_demo(data)
         .map_err(|e| ParseError::Demo(format!("{e:?}")))?;
 
     // End-of-match scoreboard first; the live roster covers demos without it.
@@ -266,23 +259,52 @@ fn read_events_pass(path: &Path) -> Result<(Match, Vec<MatchEvent>), ParseError>
     Ok((m, events))
 }
 
-/// Full parse: rounds and events plus per-round snapshots (every 4 ticks), economy, bomb and the
-/// real tick rate, and grenades. The demo is read three times (events, player state, projectiles):
-/// the demoparser2 core cannot collect events and entity state in one pass.
-pub fn parse(path: &Path) -> Result<Match, ParseError> {
-    let (mut m, events) = read_events_pass(path)?;
+/// Coarse progress of `parse`: the core has no hook inside a pass, so it is reported at the
+/// boundaries of the steps. `percent` is monotonic, 0 at the start and 100 when done.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Progress {
+    pub stage: Stage,
+    pub percent: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stage {
+    /// Pass 1: header, roster, rounds, events.
+    Events,
+    /// Pass 2: player snapshots.
+    Players,
+    /// Pass 3: grenades in flight.
+    Grenades,
+    /// Assembling rounds, bomb, grenades and statistics.
+    Assemble,
+    Done,
+}
+
+/// Full parse of a demo held in memory: rounds, events, per-round snapshots (every 4 ticks),
+/// economy, bomb, grenades, statistics and the real tick rate. The demo is read three times
+/// (events, player state, projectiles): the demoparser2 core cannot collect events and entity
+/// state in one pass. `progress` is called at the start and end of each step.
+pub fn parse(data: &[u8], progress: &mut dyn FnMut(Progress)) -> Result<Match, ParseError> {
+    let mut report = |stage, percent| progress(Progress { stage, percent });
+    report(Stage::Events, 0);
+    let (mut m, events) = read_events_pass(data)?;
     if m.rounds.is_empty() {
+        report(Stage::Done, 100);
         return Ok(m);
     }
-    let rows = read_tick_rows(path, snapshot_ticks(&m.rounds))?;
+    report(Stage::Players, 30);
+    let rows = read_tick_rows(data, snapshot_ticks(&m.rounds))?;
+    report(Stage::Grenades, 65);
+    let points = read_projectiles(data)?;
+    report(Stage::Assemble, 90);
     m.tick_rate = derive_tick_rate(&rows, &m.rounds);
     let mut dict = Dict::default();
     fill_snapshots(&mut m.rounds, &m.players, &rows, &mut dict);
     fill_events(&mut m.rounds, &m.players, &events, &mut dict);
-    let points = read_projectiles(path)?;
     fill_grenades(&mut m.rounds, &m.players, &points, &events);
     m.weapons = dict.names;
     m.stats = crate::stats::fill_stats(&mut m.rounds, m.players.len(), m.tick_rate);
+    report(Stage::Done, 100);
     Ok(m)
 }
 
@@ -292,11 +314,8 @@ const TICK_PROPS: [&str; 11] = [
     "X", "Y", "Z", "pitch", "yaw", "health", "team_num", "balance", "armor_value", "has_helmet", "has_defuser",
 ];
 
-fn read_tick_rows(path: &Path, ticks: Vec<i32>) -> Result<Vec<TickRow>, ParseError> {
+fn read_tick_rows(data: &[u8], ticks: Vec<i32>) -> Result<Vec<TickRow>, ParseError> {
     use parser::maps::FRIENDLY_NAMES_MAPPING as FRIENDLY;
-    let file = File::open(path)?;
-    // Safety: read-only mapping, the file must not change while parsing.
-    let mmap = unsafe { MmapOptions::new().map(&file)? };
     let huf = create_huffman_lookup_table();
     let og = |name: &str| FRIENDLY.get(name).map_or(name.to_string(), |o| o.to_string());
     let mut props: Vec<String> = TICK_PROPS.iter().map(|n| og(n)).collect();
@@ -322,7 +341,7 @@ fn read_tick_rows(path: &Path, ticks: Vec<i32>) -> Result<Vec<TickRow>, ParseErr
         fallback_bytes: None,
     };
     let out = Parser::new(inputs, ParsingMode::ForceSingleThreaded)
-        .parse_demo(&mmap)
+        .parse_demo(data)
         .map_err(|e| ParseError::Demo(format!("{e:?}")))?;
 
     let named = |friendly: &str| out.prop_controller.name_to_id.get(&og(friendly)).and_then(|id| out.df.get(id));
@@ -403,11 +422,8 @@ fn texts(c: Option<&PropColumn>, i: usize) -> Vec<String> {
 }
 
 /// Pass 3: every grenade projectile on every tick (all ticks; filtered to rounds later).
-fn read_projectiles(path: &Path) -> Result<Vec<ProjPoint>, ParseError> {
+fn read_projectiles(data: &[u8]) -> Result<Vec<ProjPoint>, ParseError> {
     use parser::first_pass::prop_controller::{ENTITY_ID_ID, GRENADE_TYPE_ID, GRENADE_X, GRENADE_Y, GRENADE_Z};
-    let file = File::open(path)?;
-    // Safety: read-only mapping, the file must not change while parsing.
-    let mmap = unsafe { MmapOptions::new().map(&file)? };
     let huf = create_huffman_lookup_table();
     let inputs = ParserInputs {
         real_name_to_og_name: AHashMap::default(),
@@ -429,7 +445,7 @@ fn read_projectiles(path: &Path) -> Result<Vec<ProjPoint>, ParseError> {
         fallback_bytes: None,
     };
     let out = Parser::new(inputs, ParsingMode::ForceSingleThreaded)
-        .parse_demo(&mmap)
+        .parse_demo(data)
         .map_err(|e| ParseError::Demo(format!("{e:?}")))?;
     // Note: `out.projectiles` stays empty in the core; the data is in the dataframe columns.
     let col = |id: u32| out.df.get(&id).and_then(|c| c.data.as_ref());
