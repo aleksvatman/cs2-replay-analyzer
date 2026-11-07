@@ -10,6 +10,10 @@ pub mod retention;
 pub mod state;
 pub mod storage;
 
+use std::io::{Read, Write};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
+use std::time::Duration;
+
 use axum::middleware::from_fn_with_state;
 use axum::routing::{get, post};
 use axum::Router;
@@ -42,4 +46,42 @@ pub fn router(state: AppState) -> Router {
 
 async fn fallback() -> ApiError {
     ApiError::NotFound
+}
+
+/// Asks a running server whether it is alive: `GET /health` over plain TCP, no extra tools.
+/// Used by `server healthcheck` (the Docker health check; the image has no curl).
+/// An unspecified bind address (`0.0.0.0`) is reached through loopback.
+pub fn healthcheck(bind_addr: SocketAddr) -> Result<(), String> {
+    let ip = if bind_addr.ip().is_unspecified() {
+        IpAddr::V4(Ipv4Addr::LOCALHOST)
+    } else {
+        bind_addr.ip()
+    };
+    let addr = SocketAddr::new(ip, bind_addr.port());
+    let timeout = Duration::from_secs(3);
+    let mut stream = TcpStream::connect_timeout(&addr, timeout)
+        .map_err(|e| format!("cannot connect to {addr}: {e}"))?;
+    stream
+        .set_read_timeout(Some(timeout))
+        .map_err(|e| e.to_string())?;
+    stream
+        .set_write_timeout(Some(timeout))
+        .map_err(|e| e.to_string())?;
+    stream
+        .write_all(b"GET /health HTTP/1.0\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+        .map_err(|e| format!("cannot send the request: {e}"))?;
+    let mut answer = String::new();
+    // the status line is all that is needed
+    let mut buf = [0u8; 64];
+    let n = stream
+        .read(&mut buf)
+        .map_err(|e| format!("no answer: {e}"))?;
+    answer.push_str(&String::from_utf8_lossy(&buf[..n]));
+    match answer.split_whitespace().nth(1) {
+        Some("200") => Ok(()),
+        _ => Err(format!(
+            "unexpected answer: {:?}",
+            answer.lines().next().unwrap_or("")
+        )),
+    }
 }

@@ -1,0 +1,17 @@
+{
+	servers {
+		timeouts {
+			# a 400 MB demo over a mobile connection takes minutes
+			read_body 30m
+		}
+	}
+}
+
+# SITE_ADDRESS is a domain (HTTPS and certificates are automatic) or http://localhost for a local test
+{$SITE_ADDRESS} {
+	request_body {
+		# a little more than MAX_UPLOAD_BYTES (1 GiB by default); the server enforces its own limit
+		max_size 1100MB
+	}
+	reverse_proxy server:8080
+}
