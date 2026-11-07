@@ -1,13 +1,18 @@
 //! Thin wrapper over the demoparser2 core: header, roster and round events.
 
 use crate::error::ParseError;
-use crate::extract::{build_rounds, RoundEvent};
+use crate::extract::{build_rounds, derive_tick_rate, fill_snapshots, snapshot_ticks, RoundEvent, TickRow};
 use crate::models::{Match, Player, Team, SCHEMA_VERSION};
 use ahash::AHashMap;
 use memmap2::MmapOptions;
 use parser::first_pass::parser_settings::ParserInputs;
 use parser::parse_demo::{Parser, ParsingMode};
+use parser::first_pass::prop_controller::{
+    GAME_TIME_ID, INVENTORY_ID, IS_ALIVE_ID, PITCH_ID, PLAYER_X_ID, PLAYER_Y_ID, PLAYER_Z_ID, STEAMID_ID, TICK_ID,
+    WEAPON_NAME_ID, YAW_ID,
+};
 use parser::second_pass::parser_settings::create_huffman_lookup_table;
+use parser::second_pass::variants::{PropColumn, VarVec};
 use std::collections::BTreeMap;
 use std::fs::File;
 use std::path::Path;
@@ -70,7 +75,7 @@ fn round_event(e: &parser::second_pass::game_events::GameEvent) -> Option<RoundE
     }
 }
 
-/// Match-level info: map, tick rate and the player roster.
+/// Cheap pass: map, player roster and rounds (start/end/winner), without snapshots.
 pub fn read_match_info(path: &Path) -> Result<Match, ParseError> {
     let file = File::open(path)?;
     // Safety: read-only mapping, the file must not change while parsing.
@@ -79,7 +84,7 @@ pub fn read_match_info(path: &Path) -> Result<Match, ParseError> {
     let inputs = ParserInputs {
         real_name_to_og_name: AHashMap::default(),
         wanted_players: vec![],
-        wanted_player_props: vec!["team_num".into()],
+        wanted_player_props: vec![],
         wanted_other_props: vec![],
         wanted_prop_states: AHashMap::default(),
         wanted_ticks: vec![],
@@ -131,11 +136,140 @@ pub fn read_match_info(path: &Path) -> Result<Match, ParseError> {
             .as_ref()
             .and_then(|h| h.get("map_name").cloned())
             .unwrap_or_default(),
-        // The demo does not expose it directly; CS2 matchmaking and servers run at 64.
-        // TODO: derive from tick/game-time once the tick pass exists (stage 4).
+        // The demo does not expose it; `parse` derives it from game time in the tick pass.
         tick_rate: DEFAULT_TICK_RATE,
         players,
         weapons: vec![],
         rounds: build_rounds(&round_events),
     })
+}
+
+/// Full parse: `read_match_info` plus per-round snapshots (every 4 ticks), economy and the
+/// real tick rate. This reads the demo twice: events and entity state cannot be collected
+/// in the same pass of the demoparser2 core.
+pub fn parse(path: &Path) -> Result<Match, ParseError> {
+    let mut m = read_match_info(path)?;
+    if m.rounds.is_empty() {
+        return Ok(m);
+    }
+    let rows = read_tick_rows(path, snapshot_ticks(&m.rounds))?;
+    m.tick_rate = derive_tick_rate(&rows, &m.rounds);
+    m.weapons = fill_snapshots(&mut m.rounds, &m.players, &rows);
+    Ok(m)
+}
+
+/// Friendly property names the tick pass asks for. The core wants the original
+/// (`CCSPlayerPawn.m_iHealth`-style) names for everything except its built-in columns.
+const TICK_PROPS: [&str; 11] = [
+    "X", "Y", "Z", "pitch", "yaw", "health", "team_num", "balance", "armor_value", "has_helmet", "has_defuser",
+];
+
+fn read_tick_rows(path: &Path, ticks: Vec<i32>) -> Result<Vec<TickRow>, ParseError> {
+    use parser::maps::FRIENDLY_NAMES_MAPPING as FRIENDLY;
+    let file = File::open(path)?;
+    // Safety: read-only mapping, the file must not change while parsing.
+    let mmap = unsafe { MmapOptions::new().map(&file)? };
+    let huf = create_huffman_lookup_table();
+    let og = |name: &str| FRIENDLY.get(name).map_or(name.to_string(), |o| o.to_string());
+    let mut props: Vec<String> = TICK_PROPS.iter().map(|n| og(n)).collect();
+    props.push(og("cash_spent_this_round"));
+    props.extend(["inventory", "is_alive", "active_weapon_name"].map(og));
+    let inputs = ParserInputs {
+        real_name_to_og_name: AHashMap::default(),
+        wanted_players: vec![],
+        wanted_player_props: props,
+        wanted_other_props: vec!["game_time".into()],
+        wanted_prop_states: AHashMap::default(),
+        wanted_ticks: ticks,
+        wanted_events: vec![],
+        parse_ents: true,
+        parse_projectiles: false,
+        parse_grenades: false,
+        parse_weapons: false,
+        only_header: false,
+        only_convars: false,
+        huffman_lookup_table: &huf,
+        order_by_steamid: false,
+        list_props: false,
+        fallback_bytes: None,
+    };
+    let out = Parser::new(inputs, ParsingMode::ForceSingleThreaded)
+        .parse_demo(&mmap)
+        .map_err(|e| ParseError::Demo(format!("{e:?}")))?;
+
+    let named = |friendly: &str| out.prop_controller.name_to_id.get(&og(friendly)).and_then(|id| out.df.get(id));
+    let col = |id: u32| out.df.get(&id);
+    let (tick, steam) = (col(TICK_ID), col(STEAMID_ID));
+    let (Some(tick), Some(steam)) = (tick, steam) else { return Ok(vec![]) };
+    let (x, y, z) = (col(PLAYER_X_ID), col(PLAYER_Y_ID), col(PLAYER_Z_ID));
+    let (yaw, pitch) = (col(YAW_ID), col(PITCH_ID));
+    let (alive, weapon, inventory, game_time) = (col(IS_ALIVE_ID), col(WEAPON_NAME_ID), col(INVENTORY_ID), col(GAME_TIME_ID));
+    let (hp, team, money, armor) = (named("health"), named("team_num"), named("balance"), named("armor_value"));
+    let (helmet, defuser, spent) = (named("has_helmet"), named("has_defuser"), named("cash_spent_this_round"));
+
+    let n = tick.len();
+    let mut rows = Vec::with_capacity(n);
+    for i in 0..n {
+        let (Some(t), Some(sid)) = (num(Some(tick), i), steam_id(steam, i)) else { continue };
+        rows.push(TickRow {
+            tick: t as i32,
+            steam_id: sid,
+            x: num(x, i).map(|v| v as f32),
+            y: num(y, i).map(|v| v as f32),
+            z: num(z, i).map(|v| v as f32),
+            yaw: num(yaw, i).map(|v| v as f32),
+            pitch: num(pitch, i).map(|v| v as f32),
+            hp: num(hp, i).map(|v| v as i32),
+            alive: flag(alive, i),
+            team: num(team, i).map(|v| v as i32),
+            weapon: text(weapon, i),
+            money: num(money, i).map(|v| v as i32),
+            armor: num(armor, i).map(|v| v as i32),
+            helmet: flag(helmet, i),
+            defuser: flag(defuser, i),
+            inventory: texts(inventory, i),
+            spent: num(spent, i).map(|v| v as i32),
+            game_time: num(game_time, i).map(|v| v as f32),
+        });
+    }
+    Ok(rows)
+}
+
+// Typed readers over the core's column storage.
+fn num(c: Option<&PropColumn>, i: usize) -> Option<f64> {
+    match c?.data.as_ref()? {
+        VarVec::F32(v) => v.get(i).copied().flatten().map(f64::from),
+        VarVec::I32(v) => v.get(i).copied().flatten().map(f64::from),
+        VarVec::U32(v) => v.get(i).copied().flatten().map(f64::from),
+        _ => None,
+    }
+}
+
+// Steam ids exceed f64's exact integer range, so they are read as u64.
+fn steam_id(c: &PropColumn, i: usize) -> Option<u64> {
+    match c.data.as_ref()? {
+        VarVec::U64(v) => v.get(i).copied().flatten(),
+        _ => None,
+    }
+}
+
+fn flag(c: Option<&PropColumn>, i: usize) -> Option<bool> {
+    match c?.data.as_ref()? {
+        VarVec::Bool(v) => v.get(i).copied().flatten(),
+        _ => None,
+    }
+}
+
+fn text(c: Option<&PropColumn>, i: usize) -> Option<String> {
+    match c?.data.as_ref()? {
+        VarVec::String(v) => v.get(i).cloned().flatten(),
+        _ => None,
+    }
+}
+
+fn texts(c: Option<&PropColumn>, i: usize) -> Vec<String> {
+    match c.and_then(|c| c.data.as_ref()) {
+        Some(VarVec::StringVec(v)) => v.get(i).cloned().unwrap_or_default(),
+        _ => Vec::new(),
+    }
 }
