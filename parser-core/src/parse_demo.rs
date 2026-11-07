@@ -279,7 +279,7 @@ pub fn parse(path: &Path) -> Result<Match, ParseError> {
     fill_snapshots(&mut m.rounds, &m.players, &rows, &mut dict);
     fill_events(&mut m.rounds, &m.players, &events, &mut dict);
     let points = read_projectiles(path)?;
-    fill_grenades(&mut m.rounds, &m.players, &points, &events, m.tick_rate);
+    fill_grenades(&mut m.rounds, &m.players, &points, &events);
     m.weapons = dict.names;
     Ok(m)
 }

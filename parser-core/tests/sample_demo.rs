@@ -85,7 +85,8 @@ fn grenades_match_the_demo_events() {
         assert_eq!(g.ticks[0], g.throw_tick);
         assert_eq!(*g.ticks.last().unwrap(), g.end_tick);
         assert!(g.ticks.windows(2).all(|w| w[1] > w[0]));
-        assert!(g.bounces.iter().all(|b| b.0 > g.throw_tick && b.0 < g.end_tick));
+        // One point per tick: contiguous apart from at most a gap before the exact end point.
+        assert!(g.ticks.windows(2).all(|w| w[1] - w[0] <= 3));
         if let Some(a) = &g.area {
             assert_eq!(a.start_tick, g.end_tick);
             assert!(a.end_tick.map_or(true, |e| e > a.start_tick));

@@ -174,14 +174,10 @@ pub enum GrenadeKind {
     Smoke,
     He,
     Flash,
-    Molotov,
-    Incendiary,
+    /// Molotov and incendiary grenade (one class in the demo, drawn the same).
+    Fire,
     Decoy,
 }
-
-/// `[tick, x, y, z]` (tenths of a unit): where a grenade changed direction by hitting something.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Bounce(pub i32, pub i32, pub i32, pub i32);
 
 /// What a smoke or fire leaves on the ground.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -195,8 +191,9 @@ pub struct Area {
     pub z: i32,
 }
 
-/// One thrown grenade. The trajectory is sampled every 4 ticks from `throw_tick` and always
-/// ends with the exact `end_tick` point, so `ticks` is not aligned with `Round::ticks`.
+/// One thrown grenade. The trajectory has a point on every tick from `throw_tick` to `end_tick`
+/// (flights are short), so direction changes after hitting a wall or the floor are exact and
+/// drawing straight segments between points is enough. `ticks` is not aligned with `Round::ticks`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Grenade {
@@ -212,7 +209,6 @@ pub struct Grenade {
     pub x: Vec<i32>,
     pub y: Vec<i32>,
     pub z: Vec<i32>,
-    pub bounces: Vec<Bounce>,
     /// Smoke cloud / fire area; `null` for HE, flash and decoy.
     pub area: Option<Area>,
 }

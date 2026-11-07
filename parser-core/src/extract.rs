@@ -373,7 +373,7 @@ pub enum ProjKind {
     Smoke,
     He,
     Flash,
-    /// Molotov and incendiary share a class; the thrower's side tells them apart.
+    /// Molotov and incendiary.
     Fire,
     Decoy,
 }
@@ -387,10 +387,6 @@ pub struct ProjPoint {
     pub kind: ProjKind,
     pub pos: [f32; 3],
 }
-
-const GRAVITY: f32 = 800.0;
-/// Velocity change per tick beyond free fall that counts as a collision (game units / tick).
-const BOUNCE_DELTA: f32 = 1.0;
 
 /// A contiguous stretch of one projectile entity (entity ids are reused over time).
 struct Flight<'a> {
@@ -422,33 +418,13 @@ fn split_flights(points: &[ProjPoint]) -> Vec<Flight<'_>> {
     out
 }
 
-/// Ticks at which the velocity changed more than free fall explains, merged when adjacent.
-fn find_bounces(pts: &[&ProjPoint], tick_rate: u32) -> Vec<usize> {
-    let g = GRAVITY / (tick_rate as f32 * tick_rate as f32);
-    let vel = |i: usize| -> [f32; 3] {
-        let (a, b) = (pts[i - 1].pos, pts[i].pos);
-        [b[0] - a[0], b[1] - a[1], b[2] - a[2]]
-    };
-    let mut out: Vec<usize> = Vec::new();
-    for i in 2..pts.len() {
-        let (v0, v1) = (vel(i - 1), vel(i));
-        let d = [v1[0] - v0[0], v1[1] - v0[1], v1[2] - v0[2] + g];
-        if (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt() > BOUNCE_DELTA {
-            if out.last().map_or(true, |&l| i - l > 2) {
-                out.push(i);
-            }
-        }
-    }
-    out
-}
-
 fn tenths3(p: [f32; 3]) -> (i32, i32, i32) {
     (tenths(p[0]), tenths(p[1]), tenths(p[2]))
 }
 
 /// Builds `grenades` of every round from projectile positions (every tick) and the detonation /
-/// fire events. Needs `teams` (set by `fill_snapshots`) to tell molotovs from incendiaries.
-pub fn fill_grenades(rounds: &mut [Round], players: &[Player], points: &[ProjPoint], events: &[MatchEvent], tick_rate: u32) {
+/// fire events.
+pub fn fill_grenades(rounds: &mut [Round], players: &[Player], points: &[ProjPoint], events: &[MatchEvent]) {
     let by_steam: HashMap<u64, usize> = players.iter().map(|p| (p.steam_id, p.index as usize)).collect();
     let starts: Vec<i32> = rounds.iter().map(|r| r.start_tick).collect();
     let mut used_fire = vec![false; events.len()];
@@ -503,17 +479,14 @@ pub fn fill_grenades(rounds: &mut [Round], players: &[Player], points: &[ProjPoi
             ProjKind::Decoy => {}
         }
 
-        // Trajectory: run positions up to the end of the flight, every 4 ticks, plus the end point.
-        let flight: Vec<&ProjPoint> = fl.pts.iter().copied().filter(|p| p.tick <= end_tick).collect();
+        // Trajectory: a point on every tick up to the end of the flight, plus the exact end point.
         let (mut ticks, mut xs, mut ys, mut zs) = (vec![], vec![], vec![], vec![]);
-        for (i, p) in flight.iter().enumerate() {
-            if i % SNAPSHOT_STEP as usize == 0 {
-                let (x, y, z) = tenths3(p.pos);
-                ticks.push(p.tick);
-                xs.push(x);
-                ys.push(y);
-                zs.push(z);
-            }
+        for p in fl.pts.iter().filter(|p| p.tick <= end_tick) {
+            let (x, y, z) = tenths3(p.pos);
+            ticks.push(p.tick);
+            xs.push(x);
+            ys.push(y);
+            zs.push(z);
         }
         if ticks.last() != Some(&end_tick) {
             let (x, y, z) = tenths3(end_pos);
@@ -522,13 +495,6 @@ pub fn fill_grenades(rounds: &mut [Round], players: &[Player], points: &[ProjPoi
             ys.push(y);
             zs.push(z);
         }
-        let bounces = find_bounces(&flight, tick_rate)
-            .into_iter()
-            .map(|i| {
-                let (x, y, z) = tenths3(flight[i - 1].pos);
-                Bounce(flight[i - 1].tick, x, y, z)
-            })
-            .collect();
 
         let round = &mut rounds[k - 1];
         let kind = match first.kind {
@@ -536,10 +502,7 @@ pub fn fill_grenades(rounds: &mut [Round], players: &[Player], points: &[ProjPoi
             ProjKind::He => GrenadeKind::He,
             ProjKind::Flash => GrenadeKind::Flash,
             ProjKind::Decoy => GrenadeKind::Decoy,
-            ProjKind::Fire => match round.teams.get(thrower).copied().flatten() {
-                Some(Team::CT) => GrenadeKind::Incendiary,
-                _ => GrenadeKind::Molotov,
-            },
+            ProjKind::Fire => GrenadeKind::Fire,
         };
         round.grenades.push(Grenade {
             kind,
@@ -550,7 +513,6 @@ pub fn fill_grenades(rounds: &mut [Round], players: &[Player], points: &[ProjPoi
             x: xs,
             y: ys,
             z: zs,
-            bounces,
             area,
         });
     }
@@ -688,7 +650,7 @@ mod tests {
         ProjPoint { tick, entity, steam_id: steam, kind, pos }
     }
 
-    /// A lobbed grenade: constant horizontal speed, parabola, bounce off the floor at tick 40.
+    /// A lobbed grenade: constant horizontal speed, parabola, bounce off the floor.
     fn lob(entity: i32, steam: u64, kind: ProjKind, t0: i32, ticks: i32) -> Vec<ProjPoint> {
         let g = 800.0 / (64.0 * 64.0);
         let (mut z, mut vz, mut x) = (50.0f32, 2.0f32, 0.0f32);
@@ -707,10 +669,9 @@ mod tests {
     }
 
     #[test]
-    fn grenades_flight_end_area_and_bounce() {
+    fn grenades_flight_end_and_area() {
         let mut rounds = build_rounds(&[Start(0), end(500, 2)]);
         let players = [player(0, 10)];
-        rounds[0].teams = vec![Some(Team::CT)];
         let mut pts = lob(7, 10, ProjKind::Smoke, 10, 60);
         // The smoke entity keeps existing (stationary cloud) after its bloom at tick 49.
         pts.extend((70..120).map(|t| pt(t, 7, 10, ProjKind::Smoke, [300.0, 0.0, 0.0])));
@@ -721,29 +682,20 @@ mod tests {
             MatchEvent::FireStart { tick: 230, entity: 99, thrower: 10, pos: [150.0, 0.0, 0.0] },
             MatchEvent::FireEnd { tick: 300, entity: 99 },
         ];
-        fill_grenades(&mut rounds, &players, &pts, &ev, 64);
+        fill_grenades(&mut rounds, &players, &pts, &ev);
         let g = &rounds[0].grenades;
         assert_eq!(g.len(), 2);
         let s = &g[0];
         assert_eq!((s.kind, s.thrower, s.throw_tick, s.end_tick), (GrenadeKind::Smoke, 0, 10, 49));
-        assert_eq!(s.ticks.first(), Some(&10));
-        assert_eq!(s.ticks.last(), Some(&49)); // exact end point appended
-        assert!(s.ticks[..s.ticks.len() - 1].windows(2).all(|w| w[1] - w[0] == 4));
+        // A point on every tick, ending at the bloom (the stationary cloud is not part of the flight).
+        assert_eq!(s.ticks, (10..=49).collect::<Vec<_>>());
+        // The floor bounce is kept: z rises again after hitting zero (tenths of a unit).
+        let low = s.z.iter().position(|&z| z == *s.z.iter().min().unwrap()).unwrap();
+        assert!(s.z[low + 1] > s.z[low] && low > 0 && s.z[low - 1] > s.z[low]);
         assert_eq!(s.area, Some(Area { start_tick: 49, end_tick: Some(400), x: 2450, y: 0, z: 0 }));
-        assert!(!s.bounces.is_empty(), "floor bounce detected");
         let f = &g[1];
-        assert_eq!(f.kind, GrenadeKind::Incendiary); // thrown by a CT
+        assert_eq!(f.kind, GrenadeKind::Fire);
         assert_eq!(f.end_tick, 230);
         assert_eq!(f.area.as_ref().unwrap().end_tick, Some(300));
-    }
-
-    #[test]
-    fn straight_fall_has_no_bounce() {
-        let g = 800.0 / (64.0 * 64.0);
-        let mut v = 0.0;
-        let mut z = 1000.0;
-        let pts: Vec<ProjPoint> = (0..30).map(|t| { let p = pt(t, 1, 1, ProjKind::He, [t as f32 * 4.0, 0.0, z]); v -= g; z += v; p }).collect();
-        let refs: Vec<&ProjPoint> = pts.iter().collect();
-        assert!(find_bounces(&refs, 64).is_empty());
     }
 }
