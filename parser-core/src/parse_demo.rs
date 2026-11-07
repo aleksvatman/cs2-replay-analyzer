@@ -172,17 +172,42 @@ fn int_field(e: &parser::second_pass::game_events::GameEvent, name: &str) -> Opt
     }
 }
 
+/// Winner as a team number (2 = T, 3 = CT, 0 = none). Older demos carry the number, newer ones
+/// (and the core's own `round_end` event) the string "T" / "CT".
+fn winner_num(e: &Ev) -> i32 {
+    use parser::second_pass::variants::Variant;
+    match field(e, "winner") {
+        Some(Variant::String(s)) => match s.as_str() {
+            "T" => 2,
+            "CT" => 3,
+            other => other.parse().unwrap_or(0),
+        },
+        _ => int_field(e, "winner").unwrap_or(0),
+    }
+}
+
+/// Round end reason as the numeric game code; names ("bomb_defused") are looked up in the
+/// core's table.
+fn reason_code(e: &Ev) -> i32 {
+    use parser::second_pass::variants::Variant;
+    match field(e, "reason") {
+        Some(Variant::String(s)) => parser::maps::ROUND_WIN_REASON
+            .entries()
+            .find(|(_, name)| **name == s.as_str())
+            .map(|(code, _)| *code)
+            .or_else(|| s.parse().ok())
+            .unwrap_or(0),
+        _ => int_field(e, "reason").unwrap_or(0),
+    }
+}
+
 fn round_event(e: &parser::second_pass::game_events::GameEvent) -> Option<RoundEvent> {
     let tick = e.tick;
     match e.name.as_str() {
         "begin_new_match" => Some(RoundEvent::NewMatch(tick)),
         "round_start" => Some(RoundEvent::Start(tick)),
         "round_freeze_end" => Some(RoundEvent::FreezeEnd(tick)),
-        "round_end" => Some(RoundEvent::End {
-            tick,
-            winner: int_field(e, "winner").unwrap_or(0),
-            reason: int_field(e, "reason").unwrap_or(0),
-        }),
+        "round_end" => Some(RoundEvent::End { tick, winner: winner_num(e), reason: reason_code(e) }),
         _ => None,
     }
 }

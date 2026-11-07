@@ -1,5 +1,7 @@
 //! Invariants on a real demo. Skipped when `samples/test_demo.dem` is absent (demos are not in git).
 
+mod common;
+
 use std::path::PathBuf;
 
 fn demo() -> Option<PathBuf> {
@@ -186,4 +188,10 @@ fn every_reference_points_to_something() {
     }
     // Names resolve to something in every weapon list.
     assert!(m.weapons.iter().all(|w| !w.is_empty()));
+}
+
+#[test]
+fn shared_invariants_hold() {
+    let Some(path) = demo() else { return };
+    common::check_invariants(&parser_core::parse_file(&path, None).unwrap());
 }

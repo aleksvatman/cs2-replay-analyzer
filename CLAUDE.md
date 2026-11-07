@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Команды: `cargo test -p parser-core` (интеграционный тест пропускается без `samples/test_demo.dem`, демки в git не лежат); `cargo run --release -p parser-core --example parse -- samples/test_demo.dem [out.json|out.json.gz]` печатает JSON (в stdout, если путь не задан) и прогресс в stderr; примеры `events`, `ticks` и `proj` — отладочные дампы сырых данных demoparser2.
 
-Эталон: `samples/test_demo.expected.json.gz` (полный JSON тестовой демки, сжатый). Тест `output_matches_the_reference_json` сравнивает с ним побайтно. Если формат изменён намеренно, пересоздай эталон командой `parse` выше с выходом `samples/test_demo.expected.json.gz` и закоммить. Без `samples/test_demo.dem` тесты на демке пропускаются.
+Эталон: `samples/test_demo.expected.json.gz` (полный JSON тестовой демки, сжатый). Тест `output_matches_the_reference_json` сравнивает с ним побайтно. Если формат изменён намеренно, пересоздай эталон командой `parse` выше с выходом `samples/test_demo.expected.json.gz` и закоммить. Без `samples/test_demo.dem` тесты на демке пропускаются. Полный матч (`samples/natus-vincere-vs-falcons-m1-ancient.dem`, 410 МБ, не в git): `cargo test --release -p parser-core --test full_match` (в debug очень медленно).
 
 **Отклонение от спецификации:** по решению владельца в первую версию парсера входят позиция брошенной бомбы, статистика по игрокам и экономика (деньги, закупка, инвентарь). Документы (`parser-doc.md`, `plan.md`, `docs/format.md`) уже обновлены под это решение.
 
@@ -44,3 +44,4 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `damage[].healthDmg` сырой: `stats.rs` режет его по предыдущему hp жертвы (hp начинается со 100 в каждом раунде). Урон по своим и самоубийства в статистику не идут.
 - События после `endTick` последнего раунда отбрасываются (завершение демки).
 - В CS2 нет события отскока гранаты, и отскоки не выводятся: траектория гранаты пишется на каждом тике (`grenades[].ticks/x/y/z`), излом после удара виден сам. Молотов и зажигательная это один тип `fire`. Колонки снарядов ядро отдаёт в `df`, а не в `projectiles` (оно пустое).
+- `round_end` бывает в двух видах: числа (старая демка) и строки `"CT"`/`"t_killed"` (новая); `parse_demo.rs` приводит оба к числовым кодам. Перед первым раундом приходит служебный `round_end` с номером 0, он игнорируется.
