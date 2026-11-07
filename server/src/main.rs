@@ -29,18 +29,13 @@ async fn main() -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    match state.storage.recover() {
-        Ok(recovery) => {
-            tracing::info!(
-                requeue = recovery.requeue.len(),
-                failed = recovery.failed.len(),
-                incomplete = recovery.incomplete,
-                "storage scanned"
-            );
-            for id in recovery.requeue {
-                state.jobs.resume(id);
-            }
-        }
+    match state.recover_and_resume() {
+        Ok(recovery) => tracing::info!(
+            requeue = recovery.requeue.len(),
+            failed = recovery.failed.len(),
+            incomplete = recovery.incomplete,
+            "storage scanned"
+        ),
         Err(err) => {
             tracing::error!("cannot scan DATA_DIR: {err}");
             return ExitCode::FAILURE;
