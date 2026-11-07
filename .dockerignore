@@ -1,0 +1,7 @@
+.git
+target
+data
+samples
+*.dem
+.claude
+deploy

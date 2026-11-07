@@ -1,0 +1,48 @@
+# Server + Caddy (HTTPS). Run from this directory:
+#   cp .env.example .env     # then edit it
+#   docker compose up -d --build
+services:
+  server:
+    build:
+      context: ..
+    restart: unless-stopped
+    environment:
+      API_TOKEN: ${API_TOKEN:?set API_TOKEN in .env (openssl rand -hex 32)}
+      MAX_PARALLEL_PARSES: ${MAX_PARALLEL_PARSES:-1}
+      MAX_QUEUE: ${MAX_QUEUE:-8}
+      MAX_UPLOADS: ${MAX_UPLOADS:-4}
+      MAX_MATCHES: ${MAX_MATCHES:-200}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-1073741824}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-600}
+      RETENTION_DAYS: ${RETENTION_DAYS:-0}
+      KEEP_DEM: ${KEEP_DEM:-false}
+      RUST_LOG: ${RUST_LOG:-info}
+    volumes:
+      - data:/data
+    # one full-match parse peaks at about 0.9 GB, two at about 1.7 GB (docs/measurements.md)
+    mem_limit: ${SERVER_MEMORY_LIMIT:-2500m}
+    # a parse in progress may take 15 s or more to finish after SIGTERM
+    stop_grace_period: 60s
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:?set SITE_ADDRESS in .env (your domain)}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  data:
+  caddy_data:
+  caddy_config:
