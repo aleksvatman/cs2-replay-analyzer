@@ -135,7 +135,9 @@ fn internal(what: &'static str) -> impl Fn(std::io::Error) -> ApiError {
     move |e| ApiError::Internal(format!("{what}: {e}"))
 }
 
-/// No content type or `application/octet-stream` only; anything else is `415`.
+/// Accepts no content type, `application/octet-stream` and `application/x-www-form-urlencoded`
+/// (what `curl --data-binary` sends by default). The body is never parsed, only checked for the
+/// demo signature, so the last one is harmless. Anything else (multipart, JSON, text) is `415`.
 fn check_content_type(headers: &HeaderMap) -> Result<(), ApiError> {
     let Some(value) = headers.get(header::CONTENT_TYPE) else {
         return Ok(());
@@ -146,7 +148,7 @@ fn check_content_type(headers: &HeaderMap) -> Result<(), ApiError> {
         .and_then(|v| v.split(';').next())
         .map(|v| v.trim().to_ascii_lowercase());
     match essence.as_deref() {
-        Some("application/octet-stream") => Ok(()),
+        Some("application/octet-stream" | "application/x-www-form-urlencoded") => Ok(()),
         _ => Err(ApiError::UnsupportedMediaType),
     }
 }
@@ -216,9 +218,14 @@ mod tests {
             "Application/Octet-Stream; x=1"
         )]))
         .is_ok());
+        assert!(check_content_type(&headers(&[(
+            "content-type",
+            "application/x-www-form-urlencoded"
+        )]))
+        .is_ok());
         for bad in [
-            "application/x-www-form-urlencoded",
             "text/plain",
+            "application/json",
             "multipart/form-data; boundary=x",
         ] {
             assert!(

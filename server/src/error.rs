@@ -64,7 +64,9 @@ impl ApiError {
             ApiError::NotReady => "match data is not ready yet".into(),
             ApiError::RequestTimeout => "the upload stalled".into(),
             ApiError::PayloadTooLarge => "file is larger than the upload limit".into(),
-            ApiError::UnsupportedMediaType => "unsupported content type".into(),
+            ApiError::UnsupportedMediaType => {
+                "send the file as the raw request body (Content-Type: application/octet-stream), not as multipart, JSON or text".into()
+            }
             ApiError::QueueFull => "the parse queue is full, try again later".into(),
             ApiError::Internal(_) => "internal server error".into(),
         }

@@ -281,13 +281,29 @@ async fn rejects_other_content_types() {
     let data = tempfile::tempdir().unwrap();
     let state = state(data.path(), 1 << 20);
     let request = Request::post("/matches")
-        .header("content-type", "application/x-www-form-urlencoded")
+        .header("content-type", "multipart/form-data; boundary=x")
         .body(Body::from(demo(b"x")))
         .unwrap();
     let (status, json) = send(&state, request).await;
     assert_eq!(status, StatusCode::UNSUPPORTED_MEDIA_TYPE);
     assert_eq!(json["error"]["code"], "unsupported_media_type");
+    assert!(json["error"]["message"]
+        .as_str()
+        .unwrap()
+        .contains("raw request body"));
     assert!(match_dirs(data.path()).is_empty());
+}
+
+#[tokio::test]
+async fn accepts_the_default_curl_content_type() {
+    let data = tempfile::tempdir().unwrap();
+    let state = state(data.path(), 1 << 20);
+    let request = Request::post("/matches")
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(Body::from(demo(b"curl")))
+        .unwrap();
+    let (status, _) = send(&state, request).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
 }
 
 #[tokio::test]
