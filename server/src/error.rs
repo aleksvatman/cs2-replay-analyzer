@@ -23,6 +23,13 @@ pub enum ApiError {
     Unprocessable(String),
     /// The parse queue is full.
     QueueFull,
+    /// Too many requests or uploads at once; try again after `retry_after` seconds.
+    TooManyRequests {
+        message: String,
+        retry_after: u64,
+    },
+    /// The server already holds `MAX_MATCHES` matches.
+    StorageFull,
     /// Details go to the log, the client gets a generic message.
     Internal(String),
 }
@@ -39,6 +46,8 @@ impl ApiError {
             ApiError::UnsupportedMediaType => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             ApiError::Unprocessable(_) => StatusCode::UNPROCESSABLE_ENTITY,
             ApiError::QueueFull => StatusCode::SERVICE_UNAVAILABLE,
+            ApiError::TooManyRequests { .. } => StatusCode::TOO_MANY_REQUESTS,
+            ApiError::StorageFull => StatusCode::INSUFFICIENT_STORAGE,
             ApiError::Internal(_) => StatusCode::INTERNAL_SERVER_ERROR,
         }
     }
@@ -55,6 +64,8 @@ impl ApiError {
             ApiError::UnsupportedMediaType => "unsupported_media_type",
             ApiError::Unprocessable(_) => "unprocessable",
             ApiError::QueueFull => "queue_full",
+            ApiError::TooManyRequests { .. } => "too_many_requests",
+            ApiError::StorageFull => "storage_full",
             ApiError::Internal(_) => "internal",
         }
     }
@@ -71,6 +82,10 @@ impl ApiError {
                 "send the file as the raw request body (Content-Type: application/octet-stream), not as multipart, JSON or text".into()
             }
             ApiError::QueueFull => "the parse queue is full, try again later".into(),
+            ApiError::TooManyRequests { message, .. } => message.clone(),
+            ApiError::StorageFull => {
+                "the server holds the maximum number of matches, delete some first".into()
+            }
             ApiError::Internal(_) => "internal server error".into(),
         }
     }
@@ -83,7 +98,12 @@ impl IntoResponse for ApiError {
         }
         let body = Json(json!({ "error": { "code": self.code(), "message": self.message() } }));
         let mut response = (self.status(), body).into_response();
-        match self {
+        match &self {
+            ApiError::TooManyRequests { retry_after, .. } => {
+                response
+                    .headers_mut()
+                    .insert(header::RETRY_AFTER, HeaderValue::from(*retry_after));
+            }
             ApiError::QueueFull => {
                 response
                     .headers_mut()
@@ -122,6 +142,15 @@ mod tests {
             (ApiError::Unprocessable("x".into()), 422, "unprocessable"),
             (ApiError::Internal("x".into()), 500, "internal"),
             (ApiError::QueueFull, 503, "queue_full"),
+            (
+                ApiError::TooManyRequests {
+                    message: "x".into(),
+                    retry_after: 1,
+                },
+                429,
+                "too_many_requests",
+            ),
+            (ApiError::StorageFull, 507, "storage_full"),
         ];
         for (err, status, code) in table {
             assert_eq!(err.status().as_u16(), status);

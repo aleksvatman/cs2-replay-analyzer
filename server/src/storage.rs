@@ -216,6 +216,23 @@ impl Storage {
         Ok(metas)
     }
 
+    /// Number of match directories, finished or still being uploaded.
+    pub fn count(&self) -> Result<usize, StorageError> {
+        let mut count = 0;
+        for entry in fs::read_dir(&self.root)? {
+            let entry = entry?;
+            if entry.file_type()?.is_dir()
+                && entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| self.dir(name).is_ok())
+            {
+                count += 1;
+            }
+        }
+        Ok(count)
+    }
+
     /// Removes a match with all its files. `Ok(false)` when it did not exist.
     pub fn delete(&self, id: &str) -> Result<bool, StorageError> {
         match fs::remove_dir_all(self.dir(id)?) {
@@ -463,6 +480,17 @@ mod tests {
         let again = storage.recover().unwrap();
         assert_eq!(again.requeue.len(), 2);
         assert!(again.failed.is_empty());
+    }
+
+    #[test]
+    fn count_counts_match_directories_only() {
+        let (_guard, storage) = storage();
+        assert_eq!(storage.count().unwrap(), 0);
+        make(&storage, Status::Done, false);
+        storage.create_dir(&Storage::new_id()).unwrap(); // an upload in progress
+        fs::create_dir(storage.root().join("not-a-match")).unwrap();
+        fs::write(storage.root().join("note.txt"), b"x").unwrap();
+        assert_eq!(storage.count().unwrap(), 2);
     }
 
     #[test]

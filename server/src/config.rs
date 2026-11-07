@@ -7,6 +7,8 @@ use std::str::FromStr;
 
 const DEFAULT_BIND_ADDR: &str = "127.0.0.1:8080";
 const DEFAULT_MAX_UPLOAD_BYTES: u64 = 1024 * 1024 * 1024;
+/// A shorter token is too easy to guess (`openssl rand -hex 32` makes a good one).
+pub const MIN_TOKEN_CHARS: usize = 16;
 
 #[derive(Clone, PartialEq)]
 pub struct Config {
@@ -18,6 +20,10 @@ pub struct Config {
     pub max_parallel_parses: usize,
     pub max_queue: usize,
     pub max_matches: usize,
+    /// Uploads that may be received at the same time.
+    pub max_uploads: usize,
+    /// Authenticated requests per minute, all clients together; 0 turns the limit off.
+    pub rate_limit_per_minute: u32,
     /// 0 keeps matches forever.
     pub retention_days: u32,
     pub keep_dem: bool,
@@ -34,6 +40,8 @@ impl fmt::Debug for Config {
             .field("max_parallel_parses", &self.max_parallel_parses)
             .field("max_queue", &self.max_queue)
             .field("max_matches", &self.max_matches)
+            .field("max_uploads", &self.max_uploads)
+            .field("rate_limit_per_minute", &self.rate_limit_per_minute)
             .field("retention_days", &self.retention_days)
             .field("keep_dem", &self.keep_dem)
             .finish()
@@ -96,6 +104,8 @@ impl Config {
         let max_parallel_parses: usize = parse(&get, "MAX_PARALLEL_PARSES", 1, "not a number")?;
         let max_queue = parse(&get, "MAX_QUEUE", 8, "not a number")?;
         let max_matches = parse(&get, "MAX_MATCHES", 200, "not a number")?;
+        let max_uploads: usize = parse(&get, "MAX_UPLOADS", 4, "not a number")?;
+        let rate_limit_per_minute = parse(&get, "RATE_LIMIT_PER_MINUTE", 600, "not a number")?;
         let retention_days = parse(&get, "RETENTION_DAYS", 0, "not a number")?;
         let keep_dem = parse_bool(&get, "KEEP_DEM", false)?;
 
@@ -113,6 +123,20 @@ impl Config {
                 "must be at least 1",
             ));
         }
+        if max_uploads == 0 {
+            return Err(invalid("MAX_UPLOADS", max_uploads, "must be at least 1"));
+        }
+        if api_token
+            .as_ref()
+            .is_some_and(|t| t.chars().count() < MIN_TOKEN_CHARS)
+        {
+            // the token itself is not echoed back
+            return Err(ConfigError::Invalid {
+                var: "API_TOKEN",
+                value: "<hidden>".into(),
+                reason: "must be at least 16 characters",
+            });
+        }
         if api_token.is_none() && !bind_addr.ip().is_loopback() {
             return Err(ConfigError::TokenRequired(bind_addr));
         }
@@ -125,6 +149,8 @@ impl Config {
             max_parallel_parses,
             max_queue,
             max_matches,
+            max_uploads,
+            rate_limit_per_minute,
             retention_days,
             keep_dem,
         })
@@ -192,6 +218,8 @@ mod tests {
         assert_eq!(c.max_parallel_parses, 1);
         assert_eq!(c.max_queue, 8);
         assert_eq!(c.max_matches, 200);
+        assert_eq!(c.max_uploads, 4);
+        assert_eq!(c.rate_limit_per_minute, 600);
         assert_eq!(c.retention_days, 0);
         assert!(!c.keep_dem);
     }
@@ -201,22 +229,26 @@ mod tests {
         let c = load(&[
             ("BIND_ADDR", "0.0.0.0:9000"),
             ("DATA_DIR", "/var/lib/cs2"),
-            ("API_TOKEN", "secret"),
+            ("API_TOKEN", "0123456789abcdef"),
             ("MAX_UPLOAD_BYTES", "500"),
             ("MAX_PARALLEL_PARSES", "2"),
             ("MAX_QUEUE", "3"),
             ("MAX_MATCHES", "10"),
+            ("MAX_UPLOADS", "2"),
+            ("RATE_LIMIT_PER_MINUTE", "0"),
             ("RETENTION_DAYS", "30"),
             ("KEEP_DEM", "TRUE"),
         ])
         .unwrap();
         assert_eq!(c.bind_addr, "0.0.0.0:9000".parse().unwrap());
         assert_eq!(c.data_dir, PathBuf::from("/var/lib/cs2"));
-        assert_eq!(c.api_token.as_deref(), Some("secret"));
+        assert_eq!(c.api_token.as_deref(), Some("0123456789abcdef"));
         assert_eq!(c.max_upload_bytes, 500);
         assert_eq!(c.max_parallel_parses, 2);
         assert_eq!(c.max_queue, 3);
         assert_eq!(c.max_matches, 10);
+        assert_eq!(c.max_uploads, 2);
+        assert_eq!(c.rate_limit_per_minute, 0);
         assert_eq!(c.retention_days, 30);
         assert!(c.keep_dem);
     }
@@ -243,6 +275,9 @@ mod tests {
             ("MAX_UPLOAD_BYTES", "0"),
             ("MAX_PARALLEL_PARSES", "0"),
             ("MAX_QUEUE", "-1"),
+            ("MAX_UPLOADS", "0"),
+            ("RATE_LIMIT_PER_MINUTE", "-5"),
+            ("API_TOKEN", "too-short"),
             ("KEEP_DEM", "maybe"),
         ] {
             let err = load(&[(var, value)]).unwrap_err();
@@ -255,9 +290,16 @@ mod tests {
 
     #[test]
     fn debug_hides_the_token() {
-        let c = load(&[("API_TOKEN", "super-secret")]).unwrap();
+        let c = load(&[("API_TOKEN", "super-secret-token-123")]).unwrap();
         let text = format!("{c:?}");
-        assert!(!text.contains("super-secret"));
+        assert!(!text.contains("super-secret-token-123"));
         assert!(text.contains("<set>"));
+    }
+
+    #[test]
+    fn a_short_token_is_rejected_without_echoing_it() {
+        let err = load(&[("API_TOKEN", "hunter2")]).unwrap_err();
+        assert!(!err.to_string().contains("hunter2"));
+        assert!(err.to_string().contains("16"));
     }
 }

@@ -3,10 +3,11 @@
 use std::io;
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Semaphore};
 
 use crate::config::Config;
 use crate::jobs::{Jobs, Runner};
+use crate::limits::RateLimiter;
 use crate::storage::Storage;
 
 #[derive(Clone, Debug)]
@@ -17,6 +18,9 @@ pub struct AppState {
     /// Held while an upload is finalized (duplicate check, rename, `meta.json`, queueing),
     /// so two identical uploads at once cannot both create a match.
     pub upload_lock: Arc<Mutex<()>>,
+    /// One permit per upload being received (`MAX_UPLOADS`).
+    pub upload_slots: Arc<Semaphore>,
+    pub limiter: Arc<RateLimiter>,
 }
 
 impl AppState {
@@ -37,6 +41,8 @@ impl AppState {
             runner,
         );
         Ok(AppState {
+            upload_slots: Arc::new(Semaphore::new(config.max_uploads)),
+            limiter: Arc::new(RateLimiter::new(config.rate_limit_per_minute)),
             config: Arc::new(config),
             storage,
             jobs,

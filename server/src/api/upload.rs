@@ -39,6 +39,18 @@ pub async fn upload(
     if !state.jobs.has_capacity() {
         return Err(ApiError::QueueFull);
     }
+    if state.storage.count()? >= state.config.max_matches {
+        return Err(ApiError::StorageFull);
+    }
+    // held until the handler ends: at most `MAX_UPLOADS` bodies are received at once
+    let _slot = state
+        .upload_slots
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| ApiError::TooManyRequests {
+            message: "too many uploads in progress, try again soon".into(),
+            retry_after: 10,
+        })?;
     let max = state.config.max_upload_bytes;
     if let Some(length) = content_length(&headers) {
         if length > max {
@@ -70,6 +82,10 @@ pub async fn upload(
         ));
     }
 
+    // our own directory is already counted
+    if state.storage.count()? > state.config.max_matches {
+        return Err(ApiError::StorageFull);
+    }
     tokio::fs::rename(&tmp, state.storage.dem_path(&id)?)
         .await
         .map_err(|e| ApiError::Internal(format!("cannot move the demo into place: {e}")))?;
