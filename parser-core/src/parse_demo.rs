@@ -77,10 +77,12 @@ fn steam_field(e: &Ev, name: &str) -> Option<u64> {
     }
 }
 
-fn str_field(e: &Ev, name: &str) -> String {
-    match field(e, name) {
-        Some(parser::second_pass::variants::Variant::String(s)) => s.clone(),
-        _ => String::new(),
+/// Weapon name of an event; damage without one (e.g. the bomb blast) becomes "unknown" so the
+/// weapon dictionary never holds an empty name.
+fn weapon_field(e: &Ev) -> String {
+    match field(e, "weapon") {
+        Some(parser::second_pass::variants::Variant::String(s)) if !s.is_empty() => s.clone(),
+        _ => "unknown".to_string(),
     }
 }
 
@@ -118,7 +120,7 @@ fn match_event(e: &Ev) -> Option<MatchEvent> {
                 victim: user?,
                 killer: steam_field(e, "attacker_steamid"),
                 assister: steam_field(e, "assister_steamid"),
-                weapon: str_field(e, "weapon"),
+                weapon: weapon_field(e),
                 flags,
             }
         }
@@ -126,7 +128,7 @@ fn match_event(e: &Ev) -> Option<MatchEvent> {
             tick,
             victim: user?,
             attacker: steam_field(e, "attacker_steamid"),
-            weapon: str_field(e, "weapon"),
+            weapon: weapon_field(e),
             dmg: int_field(e, "dmg_health").unwrap_or(0).max(0) as u32,
             armor: int_field(e, "dmg_armor").unwrap_or(0).max(0) as u32,
             hp_after: int_field(e, "health").unwrap_or(0).max(0) as u32,

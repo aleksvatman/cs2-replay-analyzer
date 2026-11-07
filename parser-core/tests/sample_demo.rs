@@ -152,3 +152,38 @@ fn output_matches_the_reference_json() {
     let back: parser_core::Match = serde_json::from_str(&json).unwrap();
     assert_eq!(back.rounds.len(), m.rounds.len());
 }
+
+#[test]
+fn every_reference_points_to_something() {
+    let Some(path) = demo() else { return };
+    let m = parser_core::parse_file(&path, None).unwrap();
+    let np = m.players.len() as i32;
+    let nw = m.weapons.len() as u32;
+    let valid = |p: i32| (-1..np).contains(&p);
+    for (i, r) in m.rounds.iter().enumerate() {
+        let (lo, hi) = (r.start_tick, r.end_tick);
+        // Post-round events (a plant after the round was already won) stay with their round.
+        let next = m.rounds.get(i + 1).map_or(hi, |n| n.start_tick);
+        for k in &r.events.kills {
+            assert!(valid(k.1) && valid(k.3) && k.4 < nw && k.0 >= lo, "kill {k:?}");
+        }
+        for d in &r.events.damage {
+            assert!(valid(d.1) && d.2 < np as u32 && d.3 < nw && d.6 <= 100 && d.0 >= lo, "damage {d:?}");
+        }
+        assert!(r.events.blinds.iter().all(|b| valid(b.1) && b.2 < np as u32 && b.0 >= lo));
+        let b = &r.bomb;
+        assert!(b.planter.map_or(true, |p| (p as i32) < np) && b.defuser.map_or(true, |p| (p as i32) < np));
+        assert!(b.carrier.iter().all(|c| valid(c.1)));
+        assert!(b.plant_tick.map_or(true, |t| t >= lo && t <= next.max(hi)), "plant {:?} round {}", b.plant_tick, r.number);
+        for g in &r.grenades {
+            assert!((g.thrower as i32) < np && g.throw_tick >= lo && g.throw_tick <= next.max(hi));
+        }
+        for t in &r.tracks {
+            assert!(t.money.iter().all(|&x| (0..=65535).contains(&x)), "money");
+            // Coordinates in tenths of a unit; CS2 maps are within +-32768 units.
+            assert!(t.x.iter().chain(&t.y).chain(&t.z).all(|&c| c.abs() < 327_680), "position out of the map");
+        }
+    }
+    // Names resolve to something in every weapon list.
+    assert!(m.weapons.iter().all(|w| !w.is_empty()));
+}
