@@ -68,3 +68,27 @@ fn events_and_bomb_are_consistent() {
     assert_eq!(m.rounds[1].bomb.end_type, Some(parser_core::models::BombEnd::Defused));
     assert_eq!(m.rounds[5].bomb.end_type, Some(parser_core::models::BombEnd::Exploded));
 }
+
+#[test]
+fn grenades_match_the_demo_events() {
+    use parser_core::models::GrenadeKind::*;
+    let Some(path) = demo() else { return };
+    let m = parser_core::parse_demo::parse(&path).unwrap();
+    let all: Vec<_> = m.rounds.iter().flat_map(|r| r.grenades.iter()).collect();
+    let count = |k| all.iter().filter(|g| g.kind == k).count();
+    // Detonation event counts in this demo: 40 smokes, 48 flashes, 34 HE, 25 fires.
+    assert_eq!((count(Smoke), count(Flash), count(He)), (40, 48, 34));
+    assert_eq!(all.iter().filter(|g| g.area.is_some()).count(), 40 + 25);
+    for g in &all {
+        let n = g.ticks.len();
+        assert!(n >= 2 && g.x.len() == n && g.y.len() == n && g.z.len() == n);
+        assert_eq!(g.ticks[0], g.throw_tick);
+        assert_eq!(*g.ticks.last().unwrap(), g.end_tick);
+        assert!(g.ticks.windows(2).all(|w| w[1] > w[0]));
+        assert!(g.bounces.iter().all(|b| b.0 > g.throw_tick && b.0 < g.end_tick));
+        if let Some(a) = &g.area {
+            assert_eq!(a.start_tick, g.end_tick);
+            assert!(a.end_tick.map_or(true, |e| e > a.start_tick));
+        }
+    }
+}
