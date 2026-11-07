@@ -12,3 +12,5 @@ memmap2 = "0.9"
 ahash = "0.8"
 
 [dev-dependencies]
+# reference JSON in samples/ is stored gzipped
+flate2 = "1"

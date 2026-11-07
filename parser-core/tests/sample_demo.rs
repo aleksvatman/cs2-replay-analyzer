@@ -13,7 +13,7 @@ fn snapshots_are_consistent() {
         eprintln!("skipped: no samples/test_demo.dem");
         return;
     };
-    let m = parser_core::parse_demo::parse(&path).unwrap();
+    let m = parser_core::parse_file(&path, None).unwrap();
     assert_eq!(m.map, "de_mirage");
     assert_eq!(m.tick_rate, 64);
     assert_eq!(m.players.len(), 10);
@@ -44,7 +44,7 @@ fn snapshots_are_consistent() {
 #[test]
 fn events_and_bomb_are_consistent() {
     let Some(path) = demo() else { return };
-    let m = parser_core::parse_demo::parse(&path).unwrap();
+    let m = parser_core::parse_file(&path, None).unwrap();
     let np = m.players.len() as u32;
     let mut kills = 0;
     for r in &m.rounds {
@@ -73,7 +73,7 @@ fn events_and_bomb_are_consistent() {
 fn grenades_match_the_demo_events() {
     use parser_core::models::GrenadeKind::*;
     let Some(path) = demo() else { return };
-    let m = parser_core::parse_demo::parse(&path).unwrap();
+    let m = parser_core::parse_file(&path, None).unwrap();
     let all: Vec<_> = m.rounds.iter().flat_map(|r| r.grenades.iter()).collect();
     let count = |k| all.iter().filter(|g| g.kind == k).count();
     // Detonation event counts in this demo: 40 smokes, 48 flashes, 34 HE, 25 fires.
@@ -97,7 +97,7 @@ fn grenades_match_the_demo_events() {
 #[test]
 fn stats_are_consistent_with_events() {
     let Some(path) = demo() else { return };
-    let m = parser_core::parse_demo::parse(&path).unwrap();
+    let m = parser_core::parse_file(&path, None).unwrap();
     let s = &m.stats.per_player;
     assert_eq!(s.len(), m.players.len());
     let kill_events: usize = m.rounds.iter().map(|r| r.events.kills.len()).sum();
@@ -114,4 +114,41 @@ fn stats_are_consistent_with_events() {
         assert_eq!((sum(|x| x.kills), sum(|x| x.deaths), sum(|x| x.damage)), (p.kills, p.deaths, p.damage));
         assert!((p.adr - p.damage as f64 / p.rounds as f64).abs() < 0.06);
     }
+}
+
+#[test]
+fn bad_input_is_an_error_not_a_panic() {
+    assert!(parser_core::parse_bytes(b"", None).is_err());
+    assert!(parser_core::parse_bytes(&[0u8; 4096], None).is_err());
+    assert!(parser_core::parse_bytes(b"PBDEMS2\0 definitely not a demo", None).is_err()); // passes the magic, fails inside the core
+    assert!(parser_core::parse_file(std::path::Path::new("/nonexistent/x.dem"), None).is_err());
+    // A demo cut in the middle must not panic either (it may fail or return what was read).
+    if let Some(path) = demo() {
+        let data = std::fs::read(path).unwrap();
+        let cut = &data[..data.len() / 3];
+        let _ = parser_core::parse_bytes(cut, None); // Ok or Err, but returns
+    }
+}
+
+#[test]
+fn output_matches_the_reference_json() {
+    use std::io::Read;
+    let Some(path) = demo() else { return };
+    let reference = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../samples/test_demo.expected.json.gz");
+    let mut expected = String::new();
+    flate2::read::GzDecoder::new(std::fs::File::open(reference).unwrap()).read_to_string(&mut expected).unwrap();
+
+    let mut steps = Vec::new();
+    let mut progress = |p: parser_core::Progress| steps.push(p);
+    let m = parser_core::parse_file(&path, Some(&mut progress)).unwrap();
+    let json = parser_core::to_json(&m).unwrap();
+    // Regenerate with: cargo run --release -p parser-core --example parse -- samples/test_demo.dem samples/test_demo.expected.json.gz
+    assert!(json == expected, "output differs from samples/test_demo.expected.json.gz (len {} vs {}); regenerate it if the change is intended", json.len(), expected.len());
+
+    assert_eq!(steps.first().map(|p| p.percent), Some(0));
+    assert_eq!(steps.last().map(|p| (p.stage, p.percent)), Some((parser_core::Stage::Done, 100)));
+    assert!(steps.windows(2).all(|w| w[0].percent <= w[1].percent), "progress is monotonic");
+    // The JSON parses back into the same model.
+    let back: parser_core::Match = serde_json::from_str(&json).unwrap();
+    assert_eq!(back.rounds.len(), m.rounds.len());
 }
