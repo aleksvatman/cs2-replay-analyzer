@@ -44,6 +44,10 @@ pub struct Meta {
     pub sha256: Option<String>,
     pub map: Option<String>,
     pub schema_version: Option<u32>,
+    /// Number of rounds played.
+    pub rounds: Option<u32>,
+    /// Score `[a, b]`, where `a` is the team that started on the T side.
+    pub score: Option<[u32; 2]>,
 }
 
 impl Meta {
@@ -59,6 +63,8 @@ impl Meta {
             sha256: None,
             map: None,
             schema_version: None,
+            rounds: None,
+            score: None,
         }
     }
 }

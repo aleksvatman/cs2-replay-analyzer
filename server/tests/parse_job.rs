@@ -85,6 +85,13 @@ async fn a_real_demo_is_parsed_into_the_reference_json() {
     let meta = state.storage.read_meta(&id).unwrap().unwrap();
     assert_eq!(meta.map.as_deref(), Some("de_mirage"));
     assert_eq!(meta.schema_version, Some(1));
+    assert_eq!(meta.rounds, Some(10));
+    let score = meta.score.expect("the score is known");
+    assert_eq!(
+        score[0] + score[1],
+        10,
+        "every round was won by one of the two teams"
+    );
     assert!(meta.parsed_at.is_some());
     assert!(
         !state.storage.dem_path(&id).unwrap().exists(),

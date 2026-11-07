@@ -24,10 +24,13 @@ use crate::error::ApiError;
 use crate::storage::{now_unix, Status, Storage};
 
 /// What a finished parse tells the server about the match.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Parsed {
     pub map: String,
     pub schema_version: u32,
+    pub rounds: u32,
+    /// `[a, b]`: `a` is the team that started on the T side. `None` if it cannot be told.
+    pub score: Option<[u32; 2]>,
 }
 
 /// Parses `dem` and writes the gzip-compressed JSON to `json`. Errors are plain text for
@@ -217,6 +220,8 @@ impl Inner {
                 meta.status = Status::Done;
                 meta.map = Some(parsed.map);
                 meta.schema_version = Some(parsed.schema_version);
+                meta.rounds = Some(parsed.rounds);
+                meta.score = parsed.score;
                 meta.parsed_at = Some(now_unix());
                 tracing::info!(%id, seconds = started.elapsed().as_secs_f32(), "parsing done");
             }
@@ -270,9 +275,26 @@ fn parse_to_gzip(
         return Err(e);
     }
     Ok(Parsed {
+        score: score(&parsed),
+        rounds: parsed.rounds.len() as u32,
         map: parsed.map,
         schema_version: parsed.schema_version,
     })
+}
+
+/// Score of the match: `[a, b]`, `a` being the team that started on the T side. Sides swap at
+/// halftime, so the team is followed through the players it had in round 1.
+fn score(m: &parser_core::Match) -> Option<[u32; 2]> {
+    use parser_core::models::Team;
+    let first = m.rounds.first()?;
+    let anchor = first.teams.iter().position(|t| *t == Some(Team::T))?;
+    let mut score = [0, 0];
+    for round in &m.rounds {
+        let side = (*round.teams.get(anchor)?)?;
+        let winner = round.winner?;
+        score[usize::from(winner != side)] += 1;
+    }
+    Some(score)
 }
 
 #[cfg(test)]
@@ -321,6 +343,7 @@ mod tests {
             Ok(Parsed {
                 map: "de_test".into(),
                 schema_version: 1,
+                ..Parsed::default()
             })
         })
     }
@@ -416,6 +439,7 @@ mod tests {
             Ok(Parsed {
                 map: "m".into(),
                 schema_version: 1,
+                ..Parsed::default()
             })
         });
         let (_g, storage, jobs) = setup(2, 8, false, runner);
@@ -441,6 +465,7 @@ mod tests {
             Ok(Parsed {
                 map: "m".into(),
                 schema_version: 1,
+                ..Parsed::default()
             })
         });
         // one parse at a time, one waiting: three jobs would be too many
