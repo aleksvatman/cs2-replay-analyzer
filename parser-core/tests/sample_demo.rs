@@ -40,3 +40,31 @@ fn snapshots_are_consistent() {
         }
     }
 }
+
+#[test]
+fn events_and_bomb_are_consistent() {
+    let Some(path) = demo() else { return };
+    let m = parser_core::parse_demo::parse(&path).unwrap();
+    let np = m.players.len() as u32;
+    let mut kills = 0;
+    for r in &m.rounds {
+        let n = r.ticks.len();
+        kills += r.events.kills.len();
+        for k in &r.events.kills {
+            assert!(k.0 >= r.start_tick && k.2 < np && k.1 < np as i32 && (k.4 as usize) < m.weapons.len());
+        }
+        assert!(r.events.kills.iter().all(|k| k.1 != k.2 as i32 || m.weapons[k.4 as usize] != "world"), "no world suicides");
+        let b = &r.bomb;
+        assert!(b.track_x.len() <= n && b.track_x.len() == b.track_y.len() && b.track_x.len() == b.track_z.len());
+        assert!(b.carrier.iter().all(|c| (c.0 as usize) < n.max(1)));
+        if let (Some(p), Some(e)) = (b.plant_tick, b.end_tick) {
+            assert!(p < e);
+            assert!(b.end_type.is_some());
+        }
+        assert_eq!(b.defuser.is_some(), b.end_type == Some(parser_core::models::BombEnd::Defused));
+    }
+    assert!(kills > 50);
+    // Round 2 ends with a defuse, round 6 with an explosion (see round_end reasons 7 and 1).
+    assert_eq!(m.rounds[1].bomb.end_type, Some(parser_core::models::BombEnd::Defused));
+    assert_eq!(m.rounds[5].bomb.end_type, Some(parser_core::models::BombEnd::Exploded));
+}
