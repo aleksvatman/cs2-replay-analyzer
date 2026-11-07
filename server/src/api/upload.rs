@@ -35,6 +35,10 @@ pub async fn upload(
     body: Body,
 ) -> Result<(StatusCode, Json<Value>), ApiError> {
     check_content_type(&headers)?;
+    // refuse early, before a large body is read; `submit` below is the authoritative check
+    if !state.jobs.has_capacity() {
+        return Err(ApiError::QueueFull);
+    }
     let max = state.config.max_upload_bytes;
     if let Some(length) = content_length(&headers) {
         if length > max {
@@ -72,6 +76,8 @@ pub async fn upload(
     let mut meta = Meta::new(id.clone(), name, size);
     meta.sha256 = Some(sha256);
     state.storage.write_meta(&meta)?;
+    // if the queue filled up meanwhile, `?` leaves `guard` armed and the match is removed
+    state.jobs.submit(id.clone())?;
     guard.disarm();
 
     tracing::info!(%id, size, "demo uploaded");
