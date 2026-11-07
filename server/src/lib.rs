@@ -1,12 +1,15 @@
 //! HTTP server around `parser-core`. See `server-doc.md` for the full specification.
 
 pub mod api;
+pub mod auth;
 pub mod config;
 pub mod error;
 pub mod jobs;
+pub mod limits;
 pub mod state;
 pub mod storage;
 
+use axum::middleware::from_fn_with_state;
 use axum::routing::{get, post};
 use axum::Router;
 use tower_http::trace::TraceLayer;
@@ -28,6 +31,9 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/matches/{id}/data", get(api::matches::data))
         .fallback(fallback)
+        // layers run from the last one added to the first: log, check the token, then limit
+        .layer(from_fn_with_state(state.clone(), limits::rate_limit))
+        .layer(from_fn_with_state(state.clone(), auth::require_token))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
 }
