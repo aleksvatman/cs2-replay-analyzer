@@ -5,13 +5,15 @@ use server::config::Config;
 use server::state::AppState;
 use tower::ServiceExt;
 
-fn app() -> axum::Router {
-    let config = Config::from_lookup(|_| None).unwrap();
-    server::router(AppState::new(config))
+fn app(data_dir: &std::path::Path) -> axum::Router {
+    let dir = data_dir.to_str().unwrap().to_owned();
+    let config = Config::from_lookup(|name| (name == "DATA_DIR").then(|| dir.clone())).unwrap();
+    server::router(AppState::new(config).unwrap())
 }
 
 async fn get(path: &str) -> (StatusCode, String, Option<String>) {
-    let response = app()
+    let data = tempfile::tempdir().unwrap();
+    let response = app(data.path())
         .oneshot(Request::get(path).body(Body::empty()).unwrap())
         .await
         .unwrap();

@@ -20,14 +20,26 @@ async fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    if let Err(err) = std::fs::create_dir_all(&config.data_dir) {
-        tracing::error!(
-            "cannot create DATA_DIR {}: {err}",
-            config.data_dir.display()
-        );
-        return ExitCode::FAILURE;
-    }
     tracing::info!(?config, "starting");
+
+    let state = match AppState::new(config.clone()) {
+        Ok(state) => state,
+        Err(err) => {
+            tracing::error!("cannot open DATA_DIR {}: {err}", config.data_dir.display());
+            return ExitCode::FAILURE;
+        }
+    };
+    match state.storage.recover() {
+        Ok(recovery) => tracing::info!(
+            requeue = recovery.requeue.len(),
+            failed = recovery.failed.len(),
+            "storage scanned"
+        ),
+        Err(err) => {
+            tracing::error!("cannot scan DATA_DIR: {err}");
+            return ExitCode::FAILURE;
+        }
+    }
 
     let listener = match TcpListener::bind(config.bind_addr).await {
         Ok(listener) => listener,
@@ -38,7 +50,7 @@ async fn main() -> ExitCode {
     };
     tracing::info!("listening on {}", config.bind_addr);
 
-    let app = server::router(AppState::new(config));
+    let app = server::router(state);
     if let Err(err) = axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await
