@@ -1,25 +1,52 @@
 use std::path::Path;
+use std::sync::Arc;
+use std::time::Duration;
 
 use axum::body::{Body, Bytes};
 use axum::http::{Request, StatusCode};
 use futures_util::{stream, StreamExt};
 use http_body_util::BodyExt;
 use server::config::Config;
+use server::jobs::Runner;
 use server::state::AppState;
 use server::storage::{Status, Storage};
 use sha2::{Digest, Sha256};
 use tower::ServiceExt;
 
+/// A parser that never finishes while the data directory exists. Uploads stay queued or
+/// parsing, so these tests look only at the upload itself; the directory disappears when the
+/// test ends and the stand-in returns.
+fn stall_runner() -> Runner {
+    Arc::new(|dem, _json, _report| {
+        while dem.parent().is_some_and(|dir| dir.exists()) {
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        Err("test ended".into())
+    })
+}
+
 fn state(data_dir: &Path, max_upload: u64) -> AppState {
+    state_with(data_dir, max_upload, &[])
+}
+
+fn state_with(data_dir: &Path, max_upload: u64, extra: &[(&str, &str)]) -> AppState {
     let dir = data_dir.to_str().unwrap().to_owned();
     let max = max_upload.to_string();
+    let extra: Vec<(String, String)> = extra
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
     let config = Config::from_lookup(|name| match name {
         "DATA_DIR" => Some(dir.clone()),
         "MAX_UPLOAD_BYTES" => Some(max.clone()),
-        _ => None,
+        "KEEP_DEM" => Some("true".into()),
+        other => extra
+            .iter()
+            .find(|(k, _)| k == other)
+            .map(|(_, v)| v.clone()),
     })
     .unwrap();
-    AppState::new(config).unwrap()
+    AppState::with_runner(config, stall_runner()).unwrap()
 }
 
 fn demo(extra: &[u8]) -> Vec<u8> {
@@ -67,7 +94,7 @@ async fn stores_a_demo_and_creates_a_queued_match() {
     let id = body["id"].as_str().unwrap();
 
     let meta = state.storage.read_meta(id).unwrap().unwrap();
-    assert_eq!(meta.status, Status::Queued);
+    assert!(matches!(meta.status, Status::Queued | Status::Parsing));
     assert_eq!(meta.size_bytes, bytes.len() as u64);
     assert_eq!(
         meta.sha256.as_deref(),
@@ -128,6 +155,13 @@ async fn a_failed_match_does_not_block_a_new_upload() {
     let state = state(data.path(), 1 << 20);
     let (_, first) = send(&state, post(demo(b"retry"))).await;
     let id = first["id"].as_str().unwrap();
+    // let the job mark the match as parsing first, so it does not overwrite our change
+    for _ in 0..200 {
+        if state.storage.read_meta(id).unwrap().unwrap().status == Status::Parsing {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
     let mut meta = state.storage.read_meta(id).unwrap().unwrap();
     meta.status = Status::Failed;
     state.storage.write_meta(&meta).unwrap();
@@ -313,4 +347,33 @@ async fn ids_are_valid_uuids_for_the_storage() {
     let (_, body) = send(&state, post(demo(b"id"))).await;
     assert!(state.storage.dir(body["id"].as_str().unwrap()).is_ok());
     let _ = Storage::new_id();
+}
+
+#[tokio::test]
+async fn a_full_queue_refuses_uploads_before_reading_the_body() {
+    let data = tempfile::tempdir().unwrap();
+    // room for exactly one job at a time, nothing may wait
+    let state = state_with(data.path(), 1 << 20, &[("MAX_QUEUE", "0")]);
+    let (status, _) = send(&state, post(demo(b"first"))).await;
+    assert_eq!(status, StatusCode::ACCEPTED);
+
+    // the body would fail if it were read; the refusal comes first
+    let chunks: Vec<Result<Bytes, std::io::Error>> = vec![Err(std::io::Error::other("never read"))];
+    let request = Request::post("/matches")
+        .body(Body::from_stream(stream::iter(chunks)))
+        .unwrap();
+    let response = server::router(state.clone())
+        .oneshot(request)
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert!(response.headers().contains_key("retry-after"));
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(json["error"]["code"], "queue_full");
+    assert_eq!(
+        match_dirs(data.path()).len(),
+        1,
+        "only the first match exists"
+    );
 }

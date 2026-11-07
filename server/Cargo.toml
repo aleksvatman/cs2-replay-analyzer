@@ -8,13 +8,14 @@ axum = "0.8"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "signal", "fs", "io-util", "sync", "time"] }
 futures-util = "0.3"
 sha2 = "0.10"
+flate2 = "1"
+parser-core = { path = "../parser-core" }
 tower-http = { version = "0.6", features = ["trace"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-# parser-core is added at stage S4 (job queue); S1 does not parse anything yet
 
 [dev-dependencies]
 tower = { version = "0.5", features = ["util"] }

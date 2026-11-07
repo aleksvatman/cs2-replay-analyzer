@@ -3,6 +3,7 @@
 pub mod api;
 pub mod config;
 pub mod error;
+pub mod jobs;
 pub mod state;
 pub mod storage;
 
