@@ -2,7 +2,8 @@
 
 use crate::error::ParseError;
 use crate::extract::{
-    build_rounds, derive_tick_rate, fill_events, fill_snapshots, snapshot_ticks, Dict, MatchEvent, RoundEvent, TickRow,
+    build_rounds, derive_tick_rate, fill_events, fill_grenades, fill_snapshots, snapshot_ticks, Dict, MatchEvent, ProjKind,
+    ProjPoint, RoundEvent, TickRow,
 };
 use crate::models::{
     KILL_ATTACKER_BLIND, KILL_FLASH_ASSIST, KILL_HEADSHOT, KILL_NO_SCOPE, KILL_THROUGH_SMOKE, KILL_WALLBANG,
@@ -56,9 +57,10 @@ pub fn read_header(path: &Path) -> Result<BTreeMap<String, String>, ParseError> 
     Ok(out.header.unwrap_or_default().into_iter().collect())
 }
 
-const WANTED_EVENTS: [&str; 12] = [
+const WANTED_EVENTS: [&str; 18] = [
     "round_start", "round_freeze_end", "round_end", "begin_new_match", "player_death", "player_hurt", "player_blind",
-    "bomb_planted", "bomb_defused", "bomb_exploded", "bomb_dropped", "bomb_pickup",
+    "bomb_planted", "bomb_defused", "bomb_exploded", "bomb_dropped", "bomb_pickup", "hegrenade_detonate",
+    "flashbang_detonate", "smokegrenade_detonate", "smokegrenade_expired", "inferno_startburn", "inferno_expire",
 ];
 
 type Ev = parser::second_pass::game_events::GameEvent;
@@ -86,6 +88,15 @@ fn str_field(e: &Ev, name: &str) -> String {
         Some(parser::second_pass::variants::Variant::String(s)) => s.clone(),
         _ => String::new(),
     }
+}
+
+fn pos_field(e: &Ev) -> Option<[f32; 3]> {
+    use parser::second_pass::variants::Variant;
+    let f = |n: &str| match field(e, n) {
+        Some(Variant::F32(v)) => Some(*v),
+        _ => None,
+    };
+    Some([f("x")?, f("y")?, f("z")?])
 }
 
 fn match_event(e: &Ev) -> Option<MatchEvent> {
@@ -138,6 +149,20 @@ fn match_event(e: &Ev) -> Option<MatchEvent> {
         "bomb_exploded" => MatchEvent::BombExploded { tick, player: user.unwrap_or(0) },
         "bomb_dropped" => MatchEvent::BombDropped { tick, player: user? },
         "bomb_pickup" => MatchEvent::BombPickup { tick, player: user? },
+        "hegrenade_detonate" | "flashbang_detonate" | "smokegrenade_detonate" => MatchEvent::Detonate {
+            kind: match e.name.as_str() {
+                "hegrenade_detonate" => ProjKind::He,
+                "flashbang_detonate" => ProjKind::Flash,
+                _ => ProjKind::Smoke,
+            },
+            tick,
+            entity: int_field(e, "entityid")?,
+            thrower: user?,
+            pos: pos_field(e)?,
+        },
+        "smokegrenade_expired" => MatchEvent::SmokeExpired { tick, entity: int_field(e, "entityid")? },
+        "inferno_startburn" => MatchEvent::FireStart { tick, entity: int_field(e, "entityid")?, thrower: user?, pos: pos_field(e)? },
+        "inferno_expire" => MatchEvent::FireEnd { tick, entity: int_field(e, "entityid")? },
         _ => return None,
     })
 }
@@ -241,8 +266,8 @@ fn read_events_pass(path: &Path) -> Result<(Match, Vec<MatchEvent>), ParseError>
 }
 
 /// Full parse: rounds and events plus per-round snapshots (every 4 ticks), economy, bomb and the
-/// real tick rate. This reads the demo twice: events and entity state cannot be collected
-/// in the same pass of the demoparser2 core.
+/// real tick rate, and grenades. The demo is read three times (events, player state, projectiles):
+/// the demoparser2 core cannot collect events and entity state in one pass.
 pub fn parse(path: &Path) -> Result<Match, ParseError> {
     let (mut m, events) = read_events_pass(path)?;
     if m.rounds.is_empty() {
@@ -253,6 +278,8 @@ pub fn parse(path: &Path) -> Result<Match, ParseError> {
     let mut dict = Dict::default();
     fill_snapshots(&mut m.rounds, &m.players, &rows, &mut dict);
     fill_events(&mut m.rounds, &m.players, &events, &mut dict);
+    let points = read_projectiles(path)?;
+    fill_grenades(&mut m.rounds, &m.players, &points, &events);
     m.weapons = dict.names;
     Ok(m)
 }
@@ -371,4 +398,66 @@ fn texts(c: Option<&PropColumn>, i: usize) -> Vec<String> {
         Some(VarVec::StringVec(v)) => v.get(i).cloned().unwrap_or_default(),
         _ => Vec::new(),
     }
+}
+
+/// Pass 3: every grenade projectile on every tick (all ticks; filtered to rounds later).
+fn read_projectiles(path: &Path) -> Result<Vec<ProjPoint>, ParseError> {
+    use parser::first_pass::prop_controller::{ENTITY_ID_ID, GRENADE_TYPE_ID, GRENADE_X, GRENADE_Y, GRENADE_Z};
+    let file = File::open(path)?;
+    // Safety: read-only mapping, the file must not change while parsing.
+    let mmap = unsafe { MmapOptions::new().map(&file)? };
+    let huf = create_huffman_lookup_table();
+    let inputs = ParserInputs {
+        real_name_to_og_name: AHashMap::default(),
+        wanted_players: vec![],
+        wanted_player_props: vec![],
+        wanted_other_props: vec![],
+        wanted_prop_states: AHashMap::default(),
+        wanted_ticks: vec![],
+        wanted_events: vec![],
+        parse_ents: true,
+        parse_projectiles: true,
+        parse_grenades: false,
+        parse_weapons: false,
+        only_header: false,
+        only_convars: false,
+        huffman_lookup_table: &huf,
+        order_by_steamid: false,
+        list_props: false,
+        fallback_bytes: None,
+    };
+    let out = Parser::new(inputs, ParsingMode::ForceSingleThreaded)
+        .parse_demo(&mmap)
+        .map_err(|e| ParseError::Demo(format!("{e:?}")))?;
+    // Note: `out.projectiles` stays empty in the core; the data is in the dataframe columns.
+    let col = |id: u32| out.df.get(&id).and_then(|c| c.data.as_ref());
+    let (Some(VarVec::String(ty)), Some(VarVec::I32(tick)), Some(VarVec::I32(ent)), Some(VarVec::U64(sid))) =
+        (col(GRENADE_TYPE_ID), col(TICK_ID), col(ENTITY_ID_ID), col(STEAMID_ID))
+    else {
+        return Ok(vec![]);
+    };
+    let coord = |id: u32| match col(id) {
+        Some(VarVec::F32(v)) => v.as_slice(),
+        _ => &[],
+    };
+    let (xs, ys, zs) = (coord(GRENADE_X), coord(GRENADE_Y), coord(GRENADE_Z));
+    let mut points = Vec::with_capacity(ty.len());
+    for i in 0..ty.len() {
+        let kind = match ty[i].as_deref() {
+            Some("CSmokeGrenadeProjectile") => ProjKind::Smoke,
+            Some("CHEGrenadeProjectile") => ProjKind::He,
+            Some("CFlashbangProjectile") => ProjKind::Flash,
+            Some("CMolotovProjectile") | Some("CIncendiaryGrenadeProjectile") => ProjKind::Fire,
+            Some("CDecoyProjectile") => ProjKind::Decoy,
+            _ => continue,
+        };
+        let get = |v: &[Option<f32>]| v.get(i).copied().flatten();
+        let (Some(t), Some(e), Some(s), Some(x), Some(y), Some(z)) =
+            (tick[i], ent[i], sid[i], get(xs), get(ys), get(zs))
+        else {
+            continue;
+        };
+        points.push(ProjPoint { tick: t, entity: e, steam_id: s, kind, pos: [x, y, z] });
+    }
+    Ok(points)
 }

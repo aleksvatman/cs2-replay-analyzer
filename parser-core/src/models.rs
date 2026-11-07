@@ -65,6 +65,8 @@ pub struct Round {
     pub tracks: Vec<PlayerTrack>,
     pub events: RoundEvents,
     pub bomb: Bomb,
+    /// Grenades thrown in this round (by `throw_tick`), see `Grenade`.
+    pub grenades: Vec<Grenade>,
     /// Raw `round_end` reason from the game (1 bomb exploded, 7 defused, 8 CTs
     /// eliminated, 9 Ts eliminated, 18 CT surrender, ...). Unknown values pass through.
     pub reason: i32,
@@ -164,4 +166,49 @@ pub struct Bomb {
     /// `[tick, player, x, y, z]`: where the bomb was dropped and where it was picked up.
     pub drops: Vec<BombSpot>,
     pub pickups: Vec<BombSpot>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum GrenadeKind {
+    Smoke,
+    He,
+    Flash,
+    /// Molotov and incendiary grenade (one class in the demo, drawn the same).
+    Fire,
+    Decoy,
+}
+
+/// What a smoke or fire leaves on the ground.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Area {
+    pub start_tick: i32,
+    /// `null` if the demo ends (or the round resets) before the effect expires.
+    pub end_tick: Option<i32>,
+    pub x: i32,
+    pub y: i32,
+    pub z: i32,
+}
+
+/// One thrown grenade. The trajectory has a point on every tick from `throw_tick` to `end_tick`
+/// (flights are short), so direction changes after hitting a wall or the floor are exact and
+/// drawing straight segments between points is enough. `ticks` is not aligned with `Round::ticks`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Grenade {
+    #[serde(rename = "type")]
+    pub kind: GrenadeKind,
+    /// `Player::index` of the thrower.
+    pub thrower: u32,
+    pub throw_tick: i32,
+    /// End of the flight: HE/flash detonation, smoke bloom, fire start. Without a matching
+    /// detonation event it is the last tick the grenade was seen.
+    pub end_tick: i32,
+    pub ticks: Vec<i32>,
+    pub x: Vec<i32>,
+    pub y: Vec<i32>,
+    pub z: Vec<i32>,
+    /// Smoke cloud / fire area; `null` for HE, flash and decoy.
+    pub area: Option<Area>,
 }
