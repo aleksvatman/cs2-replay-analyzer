@@ -1,0 +1,3 @@
+/target
+# large sample demos (58 MB); keep out of git history
+/samples/*.dem
