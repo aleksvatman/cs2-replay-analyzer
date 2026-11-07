@@ -43,6 +43,8 @@ pub struct Match {
     /// Weapon id -> name. Filled in stage 4.
     pub weapons: Vec<String>,
     pub rounds: Vec<Round>,
+    /// Match statistics per player (index = `Player::index`).
+    pub stats: Stats,
 }
 
 /// One round. Per-tick data (snapshots, grenades, bomb, events) is added in later stages.
@@ -67,6 +69,8 @@ pub struct Round {
     pub bomb: Bomb,
     /// Grenades thrown in this round (by `throw_tick`), see `Grenade`.
     pub grenades: Vec<Grenade>,
+    /// Per-player round summary, indexed by `Player::index`.
+    pub summary: Vec<PlayerRound>,
     /// Raw `round_end` reason from the game (1 bomb exploded, 7 defused, 8 CTs
     /// eliminated, 9 Ts eliminated, 18 CT surrender, ...). Unknown values pass through.
     pub reason: i32,
@@ -211,4 +215,50 @@ pub struct Grenade {
     pub z: Vec<i32>,
     /// Smoke cloud / fire area; `null` for HE, flash and decoy.
     pub area: Option<Area>,
+}
+
+/// What one player did in one round. Counts follow the usual scoreboard rules: kills of
+/// teammates and suicides are not kills; damage counts only enemies and is capped at the
+/// victim's remaining health.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerRound {
+    pub kills: u32,
+    pub deaths: u32,
+    pub assists: u32,
+    pub damage: u32,
+    pub headshots: u32,
+    pub flash_assists: u32,
+    /// Kill, Assist, Survived or Traded (a teammate killed the killer within 5 seconds).
+    pub kast: bool,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Stats {
+    pub per_player: Vec<PlayerStats>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerStats {
+    pub player: u32,
+    /// Rounds in which the player had a side (was in the match).
+    pub rounds: u32,
+    pub kills: u32,
+    pub deaths: u32,
+    pub assists: u32,
+    pub team_kills: u32,
+    pub damage: u32,
+    pub headshots: u32,
+    /// Headshot kills / kills, percent with one decimal (0 without kills).
+    pub hs_percent: f64,
+    /// Average damage per round, one decimal.
+    pub adr: f64,
+    /// Percent of rounds with a Kill, Assist, Survival or Trade, one decimal.
+    pub kast_percent: f64,
+    pub flash_assists: u32,
+    pub enemies_blinded: u32,
+    /// Total time enemies were blinded by this player's flashes, milliseconds.
+    pub enemy_blind_ms: u64,
 }

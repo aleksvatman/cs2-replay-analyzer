@@ -261,6 +261,7 @@ fn read_events_pass(path: &Path) -> Result<(Match, Vec<MatchEvent>), ParseError>
         players,
         weapons: vec![],
         rounds: build_rounds(&round_events),
+        stats: Default::default(),
     };
     Ok((m, events))
 }
@@ -281,6 +282,7 @@ pub fn parse(path: &Path) -> Result<Match, ParseError> {
     let points = read_projectiles(path)?;
     fill_grenades(&mut m.rounds, &m.players, &points, &events);
     m.weapons = dict.names;
+    m.stats = crate::stats::fill_stats(&mut m.rounds, m.players.len(), m.tick_rate);
     Ok(m)
 }
 

@@ -93,3 +93,25 @@ fn grenades_match_the_demo_events() {
         }
     }
 }
+
+#[test]
+fn stats_are_consistent_with_events() {
+    let Some(path) = demo() else { return };
+    let m = parser_core::parse_demo::parse(&path).unwrap();
+    let s = &m.stats.per_player;
+    assert_eq!(s.len(), m.players.len());
+    let kill_events: usize = m.rounds.iter().map(|r| r.events.kills.len()).sum();
+    // No team kills or suicides in this demo, so every kill event is a kill and a death.
+    assert_eq!(s.iter().map(|p| p.kills).sum::<u32>() as usize, kill_events);
+    assert_eq!(s.iter().map(|p| p.deaths).sum::<u32>() as usize, kill_events);
+    for (i, p) in s.iter().enumerate() {
+        assert_eq!(p.player as usize, i);
+        assert!(p.rounds >= 9 && p.rounds <= 10);
+        assert!((0.0..=100.0).contains(&p.kast_percent) && (0.0..=100.0).contains(&p.hs_percent));
+        assert!(p.headshots <= p.kills);
+        // Totals equal the sum of the per-round summaries.
+        let sum = |f: fn(&parser_core::models::PlayerRound) -> u32| m.rounds.iter().map(|r| f(&r.summary[i])).sum::<u32>();
+        assert_eq!((sum(|x| x.kills), sum(|x| x.deaths), sum(|x| x.damage)), (p.kills, p.deaths, p.damage));
+        assert!((p.adr - p.damage as f64 / p.rounds as f64).abs() < 0.06);
+    }
+}
