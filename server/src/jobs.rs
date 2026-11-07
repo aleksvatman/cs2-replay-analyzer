@@ -218,12 +218,19 @@ impl Inner {
         match result {
             Ok(parsed) => {
                 meta.status = Status::Done;
+                meta.error = None;
                 meta.map = Some(parsed.map);
                 meta.schema_version = Some(parsed.schema_version);
                 meta.rounds = Some(parsed.rounds);
                 meta.score = parsed.score;
                 meta.parsed_at = Some(now_unix());
                 tracing::info!(%id, seconds = started.elapsed().as_secs_f32(), "parsing done");
+            }
+            Err(message) if meta.parsed_at.is_some() && json.is_file() => {
+                // a failed re-parse must not destroy the result that already exists
+                meta.status = Status::Done;
+                meta.error = Some(format!("the last re-parse failed: {message}"));
+                tracing::warn!(%id, %message, "re-parse failed, the previous result is kept");
             }
             Err(message) => {
                 meta.status = Status::Failed;

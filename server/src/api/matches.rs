@@ -36,6 +36,8 @@ pub struct Item {
     pub original_name: Option<String>,
     pub rounds: Option<u32>,
     pub score: Option<[u32; 2]>,
+    /// Format of the stored result; compare it with the version your client understands.
+    pub schema_version: Option<u32>,
 }
 
 /// `GET /matches/{id}`: the row plus progress and the error, if any.
@@ -45,7 +47,6 @@ pub struct Detail {
     #[serde(flatten)]
     pub item: Item,
     pub parsed_at: Option<u64>,
-    pub schema_version: Option<u32>,
     /// Current parse stage; `null` while waiting and after a failure.
     pub stage: Option<&'static str>,
     /// 0 while waiting, 100 when done.
@@ -64,6 +65,7 @@ impl From<&Meta> for Item {
             original_name: m.original_name.clone(),
             rounds: m.rounds,
             score: m.score,
+            schema_version: m.schema_version,
         }
     }
 }
@@ -94,7 +96,6 @@ pub async fn status(
     Ok(Json(Detail {
         item: Item::from(&meta),
         parsed_at: meta.parsed_at,
-        schema_version: meta.schema_version,
         stage,
         percent,
         error: meta.error.clone(),
@@ -118,6 +119,43 @@ pub async fn delete(
     } else {
         Err(ApiError::NotFound)
     }
+}
+
+/// Parses a kept demo again, for example after the parser or the JSON format changed.
+/// A failed re-parse leaves the previous result in place (see `jobs.rs`).
+pub async fn reparse(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<(StatusCode, Json<serde_json::Value>), ApiError> {
+    let _lock = state.upload_lock.lock().await;
+    let mut meta = load(&state, &id).await?;
+    if !matches!(meta.status, Status::Done | Status::Failed) {
+        return Err(ApiError::Conflict(
+            "the match is already waiting for or being parsed".into(),
+        ));
+    }
+    if !state.storage.dem_path(&id)?.is_file() {
+        return Err(ApiError::Conflict(
+            "the demo was not kept (start the server with KEEP_DEM=true) or is gone; upload it again".into(),
+        ));
+    }
+    let before = meta.clone();
+    meta.status = Status::Queued;
+    meta.error = None;
+    let storage = state.storage.clone();
+    let queued = meta.clone();
+    blocking(move || storage.write_meta(&queued)).await?;
+    if let Err(e) = state.jobs.submit(id.clone()) {
+        // the queue is full: leave the match as it was
+        let storage = state.storage.clone();
+        blocking(move || storage.write_meta(&before)).await?;
+        return Err(e);
+    }
+    tracing::info!(%id, "re-parse queued");
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(serde_json::json!({ "id": id, "status": meta.status })),
+    ))
 }
 
 pub async fn data(
