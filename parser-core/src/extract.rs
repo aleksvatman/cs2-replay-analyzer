@@ -73,6 +73,7 @@ pub fn build_rounds(events: &[RoundEvent]) -> Vec<Round> {
                         events: RoundEvents::default(),
                         bomb: Bomb::default(),
                         grenades: Vec::new(),
+                        summary: Vec::new(),
                         reason,
                     });
                 }
