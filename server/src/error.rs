@@ -11,6 +11,8 @@ pub enum ApiError {
     BadRequest(String),
     Unauthorized,
     NotFound,
+    /// The request clashes with the state of the match (for example deleting one being parsed).
+    Conflict(String),
     /// The match exists but its data is not ready yet.
     NotReady,
     /// The client stopped sending the body.
@@ -31,7 +33,7 @@ impl ApiError {
             ApiError::BadRequest(_) => StatusCode::BAD_REQUEST,
             ApiError::Unauthorized => StatusCode::UNAUTHORIZED,
             ApiError::NotFound => StatusCode::NOT_FOUND,
-            ApiError::NotReady => StatusCode::CONFLICT,
+            ApiError::Conflict(_) | ApiError::NotReady => StatusCode::CONFLICT,
             ApiError::RequestTimeout => StatusCode::REQUEST_TIMEOUT,
             ApiError::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             ApiError::UnsupportedMediaType => StatusCode::UNSUPPORTED_MEDIA_TYPE,
@@ -46,6 +48,7 @@ impl ApiError {
             ApiError::BadRequest(_) => "bad_request",
             ApiError::Unauthorized => "unauthorized",
             ApiError::NotFound => "not_found",
+            ApiError::Conflict(_) => "conflict",
             ApiError::NotReady => "not_ready",
             ApiError::RequestTimeout => "request_timeout",
             ApiError::PayloadTooLarge => "payload_too_large",
@@ -58,7 +61,7 @@ impl ApiError {
 
     fn message(&self) -> String {
         match self {
-            ApiError::BadRequest(m) | ApiError::Unprocessable(m) => m.clone(),
+            ApiError::BadRequest(m) | ApiError::Conflict(m) | ApiError::Unprocessable(m) => m.clone(),
             ApiError::Unauthorized => "missing or invalid token".into(),
             ApiError::NotFound => "not found".into(),
             ApiError::NotReady => "match data is not ready yet".into(),
@@ -107,6 +110,7 @@ mod tests {
             (ApiError::BadRequest("x".into()), 400, "bad_request"),
             (ApiError::Unauthorized, 401, "unauthorized"),
             (ApiError::NotFound, 404, "not_found"),
+            (ApiError::Conflict("x".into()), 409, "conflict"),
             (ApiError::NotReady, 409, "not_ready"),
             (ApiError::RequestTimeout, 408, "request_timeout"),
             (ApiError::PayloadTooLarge, 413, "payload_too_large"),

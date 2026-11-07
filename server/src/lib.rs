@@ -18,7 +18,15 @@ use crate::state::AppState;
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(api::health::health))
-        .route("/matches", post(api::upload::upload))
+        .route(
+            "/matches",
+            post(api::upload::upload).get(api::matches::list),
+        )
+        .route(
+            "/matches/{id}",
+            get(api::matches::status).delete(api::matches::delete),
+        )
+        .route("/matches/{id}/data", get(api::matches::data))
         .fallback(fallback)
         .layer(TraceLayer::new_for_http())
         .with_state(state)
