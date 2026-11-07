@@ -6,6 +6,7 @@ pub mod config;
 pub mod error;
 pub mod jobs;
 pub mod limits;
+pub mod retention;
 pub mod state;
 pub mod storage;
 
@@ -30,6 +31,7 @@ pub fn router(state: AppState) -> Router {
             get(api::matches::status).delete(api::matches::delete),
         )
         .route("/matches/{id}/data", get(api::matches::data))
+        .route("/matches/{id}/reparse", post(api::matches::reparse))
         .fallback(fallback)
         // layers run from the last one added to the first: log, check the token, then limit
         .layer(from_fn_with_state(state.clone(), limits::rate_limit))

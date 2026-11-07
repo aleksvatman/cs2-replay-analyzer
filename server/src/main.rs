@@ -42,6 +42,8 @@ async fn main() -> ExitCode {
         }
     }
 
+    server::retention::spawn(state.clone());
+
     let listener = match TcpListener::bind(config.bind_addr).await {
         Ok(listener) => listener,
         Err(err) => {

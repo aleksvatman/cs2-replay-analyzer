@@ -15,8 +15,9 @@ pub struct AppState {
     pub config: Arc<Config>,
     pub storage: Arc<Storage>,
     pub jobs: Jobs,
-    /// Held while an upload is finalized (duplicate check, rename, `meta.json`, queueing),
-    /// so two identical uploads at once cannot both create a match.
+    /// Held while a match is created or changes state in a way that must not overlap with
+    /// another such change: an upload is finalized (duplicate check, rename, `meta.json`,
+    /// queueing), a re-parse is started, the retention sweep deletes matches.
     pub upload_lock: Arc<Mutex<()>>,
     /// One permit per upload being received (`MAX_UPLOADS`).
     pub upload_slots: Arc<Semaphore>,
