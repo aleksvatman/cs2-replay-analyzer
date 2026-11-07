@@ -3,6 +3,8 @@
 use std::io;
 use std::sync::Arc;
 
+use tokio::sync::Mutex;
+
 use crate::config::Config;
 use crate::storage::Storage;
 
@@ -10,6 +12,9 @@ use crate::storage::Storage;
 pub struct AppState {
     pub config: Arc<Config>,
     pub storage: Arc<Storage>,
+    /// Held while an upload is finalized (duplicate check, rename, `meta.json`), so two
+    /// identical uploads at once cannot both create a match.
+    pub upload_lock: Arc<Mutex<()>>,
 }
 
 impl AppState {
@@ -19,6 +24,7 @@ impl AppState {
         Ok(AppState {
             config: Arc::new(config),
             storage: Arc::new(storage),
+            upload_lock: Arc::new(Mutex::new(())),
         })
     }
 }

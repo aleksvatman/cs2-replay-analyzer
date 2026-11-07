@@ -112,6 +112,8 @@ pub struct Recovery {
     pub requeue: Vec<String>,
     /// Ids marked `failed` because the demo is gone.
     pub failed: Vec<String>,
+    /// Directories without `meta.json` (uploads cut off by a crash) that were removed.
+    pub incomplete: usize,
 }
 
 #[derive(Debug)]
@@ -151,9 +153,18 @@ impl Storage {
         Ok(self.dir(id)?.join(JSON_FILE))
     }
 
+    /// Creates the (empty) directory of a new match. Fails if it already exists.
+    /// An upload writes its files here first and adds `meta.json` last, so a directory
+    /// without `meta.json` is an unfinished upload.
+    pub fn create_dir(&self, id: &str) -> Result<PathBuf, StorageError> {
+        let dir = self.dir(id)?;
+        fs::create_dir(&dir)?;
+        Ok(dir)
+    }
+
     /// Creates the directory of a new match and writes its first `meta.json`.
     pub fn create(&self, meta: &Meta) -> Result<(), StorageError> {
-        fs::create_dir(self.dir(&meta.id)?)?;
+        self.create_dir(&meta.id)?;
         self.write_meta(meta)
     }
 
@@ -208,15 +219,26 @@ impl Storage {
         }
     }
 
-    /// Startup scan: removes leftover temporary files and settles matches that were
+    /// Startup scan: removes unfinished uploads and leftover temporary files, and settles matches that were
     /// interrupted by a restart. A match that was `queued` or `parsing` goes back to
     /// `queued` if its demo is still on disk, otherwise it becomes `failed`.
     pub fn recover(&self) -> Result<Recovery, StorageError> {
         let mut recovery = Recovery::default();
         for entry in fs::read_dir(&self.root)? {
             let entry = entry?;
-            if entry.file_type()?.is_dir() {
-                remove_tmp_files(&entry.path());
+            if !entry.file_type()?.is_dir() {
+                continue;
+            }
+            let path = entry.path();
+            let is_match_dir = entry
+                .file_name()
+                .to_str()
+                .is_some_and(|name| self.dir(name).is_ok());
+            if is_match_dir && !path.join(META_FILE).exists() {
+                fs::remove_dir_all(&path)?;
+                recovery.incomplete += 1;
+            } else {
+                remove_tmp_files(&path);
             }
         }
         for mut meta in self.list()? {
@@ -418,7 +440,8 @@ mod tests {
             recovery,
             Recovery {
                 requeue: want_requeue,
-                failed: want_failed
+                failed: want_failed,
+                incomplete: 0
             }
         );
 
@@ -434,6 +457,23 @@ mod tests {
         let again = storage.recover().unwrap();
         assert_eq!(again.requeue.len(), 2);
         assert!(again.failed.is_empty());
+    }
+
+    #[test]
+    fn recover_removes_unfinished_uploads_only() {
+        let (_guard, storage) = storage();
+        let id = Storage::new_id();
+        let dir = storage.create_dir(&id).unwrap();
+        fs::write(dir.join("match.dem.tmp"), b"half").unwrap();
+        let stranger = storage.root().join("not-a-match");
+        fs::create_dir(&stranger).unwrap();
+        let kept = make(&storage, Status::Done, false);
+
+        let recovery = storage.recover().unwrap();
+        assert_eq!(recovery.incomplete, 1);
+        assert!(!dir.exists());
+        assert!(stranger.exists());
+        assert_eq!(storage.read_meta(&kept.id).unwrap(), Some(kept));
     }
 
     #[test]

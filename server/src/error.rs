@@ -13,6 +13,8 @@ pub enum ApiError {
     NotFound,
     /// The match exists but its data is not ready yet.
     NotReady,
+    /// The client stopped sending the body.
+    RequestTimeout,
     PayloadTooLarge,
     UnsupportedMediaType,
     /// Not a CS2 demo, or the parser failed.
@@ -30,6 +32,7 @@ impl ApiError {
             ApiError::Unauthorized => StatusCode::UNAUTHORIZED,
             ApiError::NotFound => StatusCode::NOT_FOUND,
             ApiError::NotReady => StatusCode::CONFLICT,
+            ApiError::RequestTimeout => StatusCode::REQUEST_TIMEOUT,
             ApiError::PayloadTooLarge => StatusCode::PAYLOAD_TOO_LARGE,
             ApiError::UnsupportedMediaType => StatusCode::UNSUPPORTED_MEDIA_TYPE,
             ApiError::Unprocessable(_) => StatusCode::UNPROCESSABLE_ENTITY,
@@ -44,6 +47,7 @@ impl ApiError {
             ApiError::Unauthorized => "unauthorized",
             ApiError::NotFound => "not_found",
             ApiError::NotReady => "not_ready",
+            ApiError::RequestTimeout => "request_timeout",
             ApiError::PayloadTooLarge => "payload_too_large",
             ApiError::UnsupportedMediaType => "unsupported_media_type",
             ApiError::Unprocessable(_) => "unprocessable",
@@ -58,8 +62,11 @@ impl ApiError {
             ApiError::Unauthorized => "missing or invalid token".into(),
             ApiError::NotFound => "not found".into(),
             ApiError::NotReady => "match data is not ready yet".into(),
+            ApiError::RequestTimeout => "the upload stalled".into(),
             ApiError::PayloadTooLarge => "file is larger than the upload limit".into(),
-            ApiError::UnsupportedMediaType => "unsupported content type".into(),
+            ApiError::UnsupportedMediaType => {
+                "send the file as the raw request body (Content-Type: application/octet-stream), not as multipart, JSON or text".into()
+            }
             ApiError::QueueFull => "the parse queue is full, try again later".into(),
             ApiError::Internal(_) => "internal server error".into(),
         }
@@ -101,6 +108,7 @@ mod tests {
             (ApiError::Unauthorized, 401, "unauthorized"),
             (ApiError::NotFound, 404, "not_found"),
             (ApiError::NotReady, 409, "not_ready"),
+            (ApiError::RequestTimeout, 408, "request_timeout"),
             (ApiError::PayloadTooLarge, 413, "payload_too_large"),
             (
                 ApiError::UnsupportedMediaType,
