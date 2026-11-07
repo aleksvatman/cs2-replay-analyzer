@@ -1,6 +1,7 @@
-//! Thin wrapper over the demoparser2 core. Stage 1: open a demo and read the header.
+//! Thin wrapper over the demoparser2 core: header, roster and round events.
 
 use crate::error::ParseError;
+use crate::extract::{build_rounds, RoundEvent};
 use crate::models::{Match, Player, Team, SCHEMA_VERSION};
 use ahash::AHashMap;
 use memmap2::MmapOptions;
@@ -45,6 +46,30 @@ pub fn read_header(path: &Path) -> Result<BTreeMap<String, String>, ParseError> 
     Ok(out.header.unwrap_or_default().into_iter().collect())
 }
 
+fn int_field(e: &parser::second_pass::game_events::GameEvent, name: &str) -> Option<i32> {
+    use parser::second_pass::variants::Variant;
+    match e.fields.iter().find(|f| f.name == name)?.data.as_ref()? {
+        Variant::I32(v) => Some(*v),
+        Variant::U32(v) => Some(*v as i32),
+        _ => None,
+    }
+}
+
+fn round_event(e: &parser::second_pass::game_events::GameEvent) -> Option<RoundEvent> {
+    let tick = e.tick;
+    match e.name.as_str() {
+        "begin_new_match" => Some(RoundEvent::NewMatch(tick)),
+        "round_start" => Some(RoundEvent::Start(tick)),
+        "round_freeze_end" => Some(RoundEvent::FreezeEnd(tick)),
+        "round_end" => Some(RoundEvent::End {
+            tick,
+            winner: int_field(e, "winner").unwrap_or(0),
+            reason: int_field(e, "reason").unwrap_or(0),
+        }),
+        _ => None,
+    }
+}
+
 /// Match-level info: map, tick rate and the player roster.
 pub fn read_match_info(path: &Path) -> Result<Match, ParseError> {
     let file = File::open(path)?;
@@ -58,7 +83,10 @@ pub fn read_match_info(path: &Path) -> Result<Match, ParseError> {
         wanted_other_props: vec![],
         wanted_prop_states: AHashMap::default(),
         wanted_ticks: vec![],
-        wanted_events: vec![],
+        wanted_events: ["round_start", "round_freeze_end", "round_end", "begin_new_match"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect(),
         parse_ents: true,
         parse_projectiles: false,
         parse_grenades: false,
@@ -94,6 +122,8 @@ pub fn read_match_info(path: &Path) -> Result<Match, ParseError> {
         })
         .collect();
 
+    let round_events: Vec<RoundEvent> = out.game_events.iter().filter_map(round_event).collect();
+
     Ok(Match {
         schema_version: SCHEMA_VERSION,
         map: out
@@ -106,6 +136,6 @@ pub fn read_match_info(path: &Path) -> Result<Match, ParseError> {
         tick_rate: DEFAULT_TICK_RATE,
         players,
         weapons: vec![],
-        rounds: vec![],
+        rounds: build_rounds(&round_events),
     })
 }

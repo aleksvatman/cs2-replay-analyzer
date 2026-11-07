@@ -42,6 +42,21 @@ pub struct Match {
     pub players: Vec<Player>,
     /// Weapon id -> name. Filled in stage 4.
     pub weapons: Vec<String>,
-    /// Filled in stage 3 onwards.
-    pub rounds: Vec<serde_json::Value>,
+    pub rounds: Vec<Round>,
+}
+
+/// One round. Per-tick data (snapshots, grenades, bomb, events) is added in later stages.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Round {
+    /// 1-based, in play order (overtime included).
+    pub number: u32,
+    pub start_tick: i32,
+    /// End of the freeze time; absent when the round ended before it (e.g. surrender).
+    pub freeze_end_tick: Option<i32>,
+    pub end_tick: i32,
+    pub winner: Option<Team>,
+    /// Raw `round_end` reason from the game (1 bomb exploded, 7 defused, 8 CTs
+    /// eliminated, 9 Ts eliminated, 18 CT surrender, ...). Unknown values pass through.
+    pub reason: i32,
 }
