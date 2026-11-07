@@ -1,7 +1,12 @@
 //! Thin wrapper over the demoparser2 core: header, roster and round events.
 
 use crate::error::ParseError;
-use crate::extract::{build_rounds, derive_tick_rate, fill_snapshots, snapshot_ticks, RoundEvent, TickRow};
+use crate::extract::{
+    build_rounds, derive_tick_rate, fill_events, fill_snapshots, snapshot_ticks, Dict, MatchEvent, RoundEvent, TickRow,
+};
+use crate::models::{
+    KILL_ATTACKER_BLIND, KILL_FLASH_ASSIST, KILL_HEADSHOT, KILL_NO_SCOPE, KILL_THROUGH_SMOKE, KILL_WALLBANG,
+};
 use crate::models::{Match, Player, Team, SCHEMA_VERSION};
 use ahash::AHashMap;
 use memmap2::MmapOptions;
@@ -51,6 +56,92 @@ pub fn read_header(path: &Path) -> Result<BTreeMap<String, String>, ParseError> 
     Ok(out.header.unwrap_or_default().into_iter().collect())
 }
 
+const WANTED_EVENTS: [&str; 12] = [
+    "round_start", "round_freeze_end", "round_end", "begin_new_match", "player_death", "player_hurt", "player_blind",
+    "bomb_planted", "bomb_defused", "bomb_exploded", "bomb_dropped", "bomb_pickup",
+];
+
+type Ev = parser::second_pass::game_events::GameEvent;
+
+fn field<'a>(e: &'a Ev, name: &str) -> Option<&'a parser::second_pass::variants::Variant> {
+    e.fields.iter().find(|f| f.name == name)?.data.as_ref()
+}
+
+fn flag_field(e: &Ev, name: &str) -> bool {
+    matches!(field(e, name), Some(parser::second_pass::variants::Variant::Bool(true)))
+}
+
+/// Steam ids in events are decimal strings; 0 and missing mean "nobody" (world, bot, no assister).
+fn steam_field(e: &Ev, name: &str) -> Option<u64> {
+    use parser::second_pass::variants::Variant;
+    match field(e, name)? {
+        Variant::String(s) => s.parse().ok().filter(|&v| v != 0),
+        Variant::U64(v) => Some(*v).filter(|&v| v != 0),
+        _ => None,
+    }
+}
+
+fn str_field(e: &Ev, name: &str) -> String {
+    match field(e, name) {
+        Some(parser::second_pass::variants::Variant::String(s)) => s.clone(),
+        _ => String::new(),
+    }
+}
+
+fn match_event(e: &Ev) -> Option<MatchEvent> {
+    let tick = e.tick;
+    let user = steam_field(e, "user_steamid");
+    Some(match e.name.as_str() {
+        "player_death" => {
+            let mut flags = 0;
+            for (name, bit) in [
+                ("headshot", KILL_HEADSHOT),
+                ("thrusmoke", KILL_THROUGH_SMOKE),
+                ("noscope", KILL_NO_SCOPE),
+                ("attackerblind", KILL_ATTACKER_BLIND),
+                ("assistedflash", KILL_FLASH_ASSIST),
+            ] {
+                if flag_field(e, name) {
+                    flags |= bit;
+                }
+            }
+            if int_field(e, "penetrated").unwrap_or(0) > 0 {
+                flags |= KILL_WALLBANG;
+            }
+            MatchEvent::Death {
+                tick,
+                victim: user?,
+                killer: steam_field(e, "attacker_steamid"),
+                assister: steam_field(e, "assister_steamid"),
+                weapon: str_field(e, "weapon"),
+                flags,
+            }
+        }
+        "player_hurt" => MatchEvent::Hurt {
+            tick,
+            victim: user?,
+            attacker: steam_field(e, "attacker_steamid"),
+            weapon: str_field(e, "weapon"),
+            dmg: int_field(e, "dmg_health").unwrap_or(0).max(0) as u32,
+            armor: int_field(e, "dmg_armor").unwrap_or(0).max(0) as u32,
+            hp_after: int_field(e, "health").unwrap_or(0).max(0) as u32,
+        },
+        "player_blind" => {
+            let secs = match field(e, "blind_duration") {
+                Some(parser::second_pass::variants::Variant::F32(v)) => *v,
+                _ => 0.0,
+            };
+            MatchEvent::Blind { tick, victim: user?, thrower: steam_field(e, "attacker_steamid"), ms: (secs * 1000.0).round() as u32 }
+        }
+        "bomb_planted" => MatchEvent::BombPlanted { tick, player: user? },
+        "bomb_defused" => MatchEvent::BombDefused { tick, player: user? },
+        "bomb_exploded" => MatchEvent::BombExploded { tick, player: user.unwrap_or(0) },
+        "bomb_dropped" => MatchEvent::BombDropped { tick, player: user? },
+        "bomb_pickup" => MatchEvent::BombPickup { tick, player: user? },
+        _ => return None,
+    })
+}
+
 fn int_field(e: &parser::second_pass::game_events::GameEvent, name: &str) -> Option<i32> {
     use parser::second_pass::variants::Variant;
     match e.fields.iter().find(|f| f.name == name)?.data.as_ref()? {
@@ -77,6 +168,11 @@ fn round_event(e: &parser::second_pass::game_events::GameEvent) -> Option<RoundE
 
 /// Cheap pass: map, player roster and rounds (start/end/winner), without snapshots.
 pub fn read_match_info(path: &Path) -> Result<Match, ParseError> {
+    read_events_pass(path).map(|(m, _)| m)
+}
+
+/// Pass 1: header, roster, rounds and the replay events.
+fn read_events_pass(path: &Path) -> Result<(Match, Vec<MatchEvent>), ParseError> {
     let file = File::open(path)?;
     // Safety: read-only mapping, the file must not change while parsing.
     let mmap = unsafe { MmapOptions::new().map(&file)? };
@@ -88,10 +184,7 @@ pub fn read_match_info(path: &Path) -> Result<Match, ParseError> {
         wanted_other_props: vec![],
         wanted_prop_states: AHashMap::default(),
         wanted_ticks: vec![],
-        wanted_events: ["round_start", "round_freeze_end", "round_end", "begin_new_match"]
-            .iter()
-            .map(|s| s.to_string())
-            .collect(),
+        wanted_events: WANTED_EVENTS.iter().map(|s| s.to_string()).collect(),
         parse_ents: true,
         parse_projectiles: false,
         parse_grenades: false,
@@ -129,7 +222,9 @@ pub fn read_match_info(path: &Path) -> Result<Match, ParseError> {
 
     let round_events: Vec<RoundEvent> = out.game_events.iter().filter_map(round_event).collect();
 
-    Ok(Match {
+    let events: Vec<MatchEvent> = out.game_events.iter().filter_map(match_event).collect();
+
+    let m = Match {
         schema_version: SCHEMA_VERSION,
         map: out
             .header
@@ -141,20 +236,24 @@ pub fn read_match_info(path: &Path) -> Result<Match, ParseError> {
         players,
         weapons: vec![],
         rounds: build_rounds(&round_events),
-    })
+    };
+    Ok((m, events))
 }
 
-/// Full parse: `read_match_info` plus per-round snapshots (every 4 ticks), economy and the
+/// Full parse: rounds and events plus per-round snapshots (every 4 ticks), economy, bomb and the
 /// real tick rate. This reads the demo twice: events and entity state cannot be collected
 /// in the same pass of the demoparser2 core.
 pub fn parse(path: &Path) -> Result<Match, ParseError> {
-    let mut m = read_match_info(path)?;
+    let (mut m, events) = read_events_pass(path)?;
     if m.rounds.is_empty() {
         return Ok(m);
     }
     let rows = read_tick_rows(path, snapshot_ticks(&m.rounds))?;
     m.tick_rate = derive_tick_rate(&rows, &m.rounds);
-    m.weapons = fill_snapshots(&mut m.rounds, &m.players, &rows);
+    let mut dict = Dict::default();
+    fill_snapshots(&mut m.rounds, &m.players, &rows, &mut dict);
+    fill_events(&mut m.rounds, &m.players, &events, &mut dict);
+    m.weapons = dict.names;
     Ok(m)
 }
 

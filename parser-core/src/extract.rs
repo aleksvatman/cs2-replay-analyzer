@@ -1,6 +1,6 @@
 //! Raw demo data -> model structures. Pure functions, testable without a demo file.
 
-use crate::models::{InventoryChange, Player, PlayerTrack, Round, Team};
+use crate::models::*;
 use std::collections::HashMap;
 
 /// Snapshot step in ticks.
@@ -70,6 +70,8 @@ pub fn build_rounds(events: &[RoundEvent]) -> Vec<Round> {
                         ticks: Vec::new(),
                         teams: Vec::new(),
                         tracks: Vec::new(),
+                        events: RoundEvents::default(),
+                        bomb: Bomb::default(),
                         reason,
                     });
                 }
@@ -107,13 +109,17 @@ fn tenths(v: f32) -> i32 {
 
 /// Interns names into the weapon dictionary (id = position).
 #[derive(Default)]
-struct Dict {
-    names: Vec<String>,
+pub struct Dict {
+    pub names: Vec<String>,
     ids: HashMap<String, u32>,
 }
 
 impl Dict {
-    fn id(&mut self, name: &str) -> u32 {
+    pub fn get(&self, name: &str) -> Option<u32> {
+        self.ids.get(name).copied()
+    }
+
+    pub fn id(&mut self, name: &str) -> u32 {
         if let Some(&id) = self.ids.get(name) {
             return id;
         }
@@ -124,16 +130,14 @@ impl Dict {
     }
 }
 
-/// Fills `ticks`, `teams` and `tracks` of every round from the sampled rows and returns the
-/// weapon dictionary. `players` must be indexed by `Player::index`.
-pub fn fill_snapshots(rounds: &mut [Round], players: &[Player], rows: &[TickRow]) -> Vec<String> {
+/// Fills `ticks`, `teams` and `tracks` of every round from the sampled rows and extends the
+/// weapon dictionary (`dict`). `players` must be indexed by `Player::index`.
+pub fn fill_snapshots(rounds: &mut [Round], players: &[Player], rows: &[TickRow], dict: &mut Dict) {
     let by_steam: HashMap<u64, usize> = players.iter().map(|p| (p.steam_id, p.index as usize)).collect();
     let by_key: HashMap<(i32, usize), &TickRow> = rows
         .iter()
         .filter_map(|r| Some(((r.tick, *by_steam.get(&r.steam_id)?), r)))
         .collect();
-    let mut dict = Dict::default();
-
     for round in rounds.iter_mut() {
         round.ticks = (round.start_tick..=round.end_tick).step_by(SNAPSHOT_STEP as usize).collect();
         round.teams = vec![None; players.len()];
@@ -199,7 +203,156 @@ pub fn fill_snapshots(rounds: &mut [Round], players: &[Player], rows: &[TickRow]
             round.tracks.push(tr);
         }
     }
-    dict.names
+}
+
+/// A game event relevant to the replay; steam ids are raw, mapped to players in `fill_events`.
+#[derive(Debug, Clone, PartialEq)]
+pub enum MatchEvent {
+    Death { tick: i32, victim: u64, killer: Option<u64>, assister: Option<u64>, weapon: String, flags: u8 },
+    Hurt { tick: i32, victim: u64, attacker: Option<u64>, weapon: String, dmg: u32, armor: u32, hp_after: u32 },
+    Blind { tick: i32, victim: u64, thrower: Option<u64>, ms: u32 },
+    BombPlanted { tick: i32, player: u64 },
+    BombDefused { tick: i32, player: u64 },
+    BombExploded { tick: i32, player: u64 },
+    BombDropped { tick: i32, player: u64 },
+    BombPickup { tick: i32, player: u64 },
+}
+
+impl MatchEvent {
+    fn tick(&self) -> i32 {
+        match self {
+            Self::Death { tick, .. } | Self::Hurt { tick, .. } | Self::Blind { tick, .. } => *tick,
+            Self::BombPlanted { tick, .. }
+            | Self::BombDefused { tick, .. }
+            | Self::BombExploded { tick, .. }
+            | Self::BombDropped { tick, .. }
+            | Self::BombPickup { tick, .. } => *tick,
+        }
+    }
+}
+
+fn snapshot_index(r: &Round, tick: i32) -> Option<usize> {
+    if r.ticks.is_empty() {
+        return None;
+    }
+    Some((((tick - r.start_tick) / SNAPSHOT_STEP).max(0) as usize).min(r.ticks.len() - 1))
+}
+
+fn spot(r: &Round, tick: i32, p: usize) -> Option<(i32, i32, i32)> {
+    let (i, t) = (snapshot_index(r, tick)?, r.tracks.get(p)?);
+    Some((t.x[i], t.y[i], t.z[i]))
+}
+
+/// Distributes events over rounds and builds each round's `events` and `bomb`.
+/// Must run after `fill_snapshots` (uses tracks for positions and the bomb carrier).
+pub fn fill_events(rounds: &mut [Round], players: &[Player], events: &[MatchEvent], dict: &mut Dict) {
+    let by_steam: HashMap<u64, usize> = players.iter().map(|p| (p.steam_id, p.index as usize)).collect();
+    let idx = |s: u64| by_steam.get(&s).copied();
+    let opt = |s: Option<u64>| s.and_then(idx).map_or(-1, |i| i as i32);
+    let starts: Vec<i32> = rounds.iter().map(|r| r.start_tick).collect();
+
+    for ev in events {
+        // Round r owns [start_r, start_{r+1}).
+        let k = starts.partition_point(|&s| s <= ev.tick());
+        if k == 0 {
+            continue;
+        }
+        // Nothing follows the last round except demo teardown (players leaving), so cut it there.
+        if k == rounds.len() && ev.tick() > rounds[k - 1].end_tick {
+            continue;
+        }
+        let round = &mut rounds[k - 1];
+        match ev {
+            MatchEvent::Death { tick, victim, killer, assister, weapon, flags } => {
+                if let Some(v) = idx(*victim) {
+                    let w = dict.id(weapon);
+                    round.events.kills.push(Kill(*tick, opt(*killer), v as u32, opt(*assister), w, *flags));
+                }
+            }
+            MatchEvent::Hurt { tick, victim, attacker, weapon, dmg, armor, hp_after } => {
+                if let Some(v) = idx(*victim) {
+                    let w = dict.id(weapon);
+                    round.events.damage.push(Damage(*tick, opt(*attacker), v as u32, w, *dmg, *armor, *hp_after));
+                }
+            }
+            MatchEvent::Blind { tick, victim, thrower, ms } => {
+                if let Some(v) = idx(*victim) {
+                    round.events.blinds.push(Blind(*tick, opt(*thrower), v as u32, *ms));
+                }
+            }
+            MatchEvent::BombPlanted { tick, player } => {
+                if round.bomb.plant_tick.is_none() {
+                    let p = idx(*player);
+                    round.bomb.plant_tick = Some(*tick);
+                    round.bomb.planter = p.map(|p| p as u32);
+                    if let Some((x, y, z)) = p.and_then(|p| spot(round, *tick, p)) {
+                        (round.bomb.x, round.bomb.y, round.bomb.z) = (Some(x), Some(y), Some(z));
+                    }
+                }
+            }
+            MatchEvent::BombDefused { tick, player } | MatchEvent::BombExploded { tick, player } => {
+                round.bomb.end_tick = Some(*tick);
+                if matches!(ev, MatchEvent::BombDefused { .. }) {
+                    round.bomb.end_type = Some(BombEnd::Defused);
+                    round.bomb.defuser = idx(*player).map(|p| p as u32);
+                } else {
+                    round.bomb.end_type = Some(BombEnd::Exploded);
+                }
+            }
+            MatchEvent::BombDropped { tick, player } | MatchEvent::BombPickup { tick, player } => {
+                if let Some(p) = idx(*player) {
+                    let (x, y, z) = spot(round, *tick, p).unwrap_or((0, 0, 0));
+                    let s = BombSpot(*tick, p as u32, x, y, z);
+                    if matches!(ev, MatchEvent::BombDropped { .. }) {
+                        round.bomb.drops.push(s);
+                    } else {
+                        round.bomb.pickups.push(s);
+                    }
+                }
+            }
+        }
+    }
+
+    let c4 = dict.get("C4 Explosive");
+    for round in rounds.iter_mut() {
+        build_bomb_track(round, c4);
+    }
+}
+
+/// Bomb position before the plant: the carrier (alive player holding C4) or the last place it was
+/// held. Derived from inventories, so it also covers the bomb being dropped on death.
+fn build_bomb_track(round: &mut Round, c4: Option<u32>) {
+    let Some(c4) = c4 else { return };
+    let n = round.ticks.len();
+    // Snapshots up to and including the plant tick.
+    let end = round.bomb.plant_tick.map_or(n, |pt| {
+        round.ticks.iter().rposition(|&t| t <= pt).map_or(0, |i| i + 1)
+    });
+    let mut cursor = vec![0usize; round.tracks.len()];
+    let mut has_c4 = vec![false; round.tracks.len()];
+    let mut last = (0, 0, 0);
+    let mut carrier = i32::MIN;
+    let b = &mut round.bomb;
+    for i in 0..end {
+        let mut holder = -1;
+        for (p, t) in round.tracks.iter().enumerate() {
+            while cursor[p] < t.inventory.len() && t.inventory[cursor[p]].0 as usize <= i {
+                has_c4[p] = t.inventory[cursor[p]].3.contains(&c4);
+                cursor[p] += 1;
+            }
+            if has_c4[p] && t.hp[i] > 0 {
+                holder = p as i32;
+                last = (t.x[i], t.y[i], t.z[i]);
+            }
+        }
+        if holder != carrier {
+            b.carrier.push((i as u32, holder));
+            carrier = holder;
+        }
+        b.track_x.push(last.0);
+        b.track_y.push(last.1);
+        b.track_z.push(last.2);
+    }
 }
 
 #[cfg(test)]
@@ -262,7 +415,8 @@ mod tests {
             // tick 8: player 10 has no pawn (dead); player 20 never appears.
             TickRow { alive: Some(false), money: Some(800), ..row(8, 10) },
         ];
-        let dict = fill_snapshots(&mut rounds, &players, &rows);
+        let mut dict = Dict::default();
+        fill_snapshots(&mut rounds, &players, &rows, &mut dict);
         let r = &rounds[0];
         assert_eq!(r.ticks, vec![0, 4, 8]);
         assert_eq!(r.teams, vec![Some(Team::CT), None]);
@@ -272,7 +426,7 @@ mod tests {
         assert_eq!(t.yaw[0], 903); // 90.25 -> 902.5 rounds half away from zero
         assert_eq!(t.hp, vec![100, 100, 0]);
         assert_eq!(t.weapon, vec![(0, 0)]);
-        assert_eq!(dict, vec!["AK-47".to_string(), "knife".to_string()]);
+        assert_eq!(dict.names, vec!["AK-47".to_string(), "knife".to_string()]);
         assert_eq!(t.inventory, vec![InventoryChange(0, 100, 1, vec![1, 0])]);
         assert_eq!(t.spent, 650);
         assert_eq!(t.money, vec![800, 800, 800]);
@@ -287,5 +441,45 @@ mod tests {
         let rows: Vec<TickRow> = [0, 640].iter().map(|&t| TickRow { game_time: Some(100.0 + t as f32 / 128.0), ..row(t, 1) }).collect();
         assert_eq!(derive_tick_rate(&rows, &rounds), 128);
         assert_eq!(derive_tick_rate(&[], &rounds), 64);
+    }
+
+    #[test]
+    fn events_and_bomb_track() {
+        let mut rounds = build_rounds(&[Start(0), FreezeEnd(4), end(40, 2), Start(100), end(120, 3)]);
+        let players = [player(0, 10), player(1, 20)];
+        let mut dict = Dict::default();
+        dict.id("C4 Explosive");
+        let mk = |tick, steam, x: f32, hp, inv: &[&str]| TickRow {
+            x: Some(x), y: Some(0.0), z: Some(0.0), yaw: Some(0.0), pitch: Some(0.0), hp: Some(hp), alive: Some(hp > 0),
+            weapon: Some("knife".into()), inventory: inv.iter().map(|s| s.to_string()).collect(), ..row(tick, steam)
+        };
+        let mut rows = vec![];
+        for (i, t) in (0..=40).step_by(4).enumerate() {
+            // Player 10 carries C4 until it dies at tick 16 (snapshot 4); player 20 picks it up at 28.
+            let p10_alive = t < 16;
+            rows.push(mk(t, 10, 10.0 + t as f32, if p10_alive { 100 } else { 0 }, if p10_alive || i < 4 { &["C4 Explosive"] } else { &[] }));
+            rows.push(mk(t, 20, 500.0, 100, if t >= 28 { &["C4 Explosive"] } else { &[] }));
+        }
+        fill_snapshots(&mut rounds, &players, &rows, &mut dict);
+        fill_events(&mut rounds, &players, &[
+            MatchEvent::Death { tick: 16, victim: 10, killer: Some(20), assister: None, weapon: "ak47".into(), flags: KILL_HEADSHOT },
+            MatchEvent::Hurt { tick: 15, victim: 10, attacker: Some(99), weapon: "ak47".into(), dmg: 100, armor: 0, hp_after: 0 },
+            MatchEvent::BombPlanted { tick: 36, player: 20 },
+            MatchEvent::BombExploded { tick: 40, player: 20 },
+            MatchEvent::BombDropped { tick: 16, player: 10 },
+            MatchEvent::Blind { tick: 110, victim: 20, thrower: None, ms: 1500 }, // round 2
+            MatchEvent::Blind { tick: 500, victim: 20, thrower: None, ms: 1 }, // after the last round: dropped
+        ], &mut dict);
+        let r = &rounds[0];
+        assert_eq!(r.events.kills, vec![Kill(16, 1, 0, -1, dict.get("ak47").unwrap(), KILL_HEADSHOT)]);
+        assert_eq!(r.events.damage[0].1, -1); // unknown attacker -> -1
+        assert_eq!((r.bomb.plant_tick, r.bomb.planter, r.bomb.end_type), (Some(36), Some(1), Some(BombEnd::Exploded)));
+        assert_eq!(r.bomb.x, Some(5000));
+        assert_eq!(r.bomb.drops, vec![BombSpot(16, 0, 260, 0, 0)]);
+        // Prefix of ticks up to the plant (snapshot 9 = tick 36): carrier 0, ground, carrier 1.
+        assert_eq!(r.bomb.track_x.len(), 10);
+        assert_eq!(r.bomb.carrier, vec![(0, 0), (4, -1), (7, 1)]);
+        assert_eq!(r.bomb.track_x[5], 220); // lies where its holder last stood (tick 12 -> x 22.0)
+        assert_eq!(rounds[1].events.blinds, vec![Blind(110, -1, 1, 1500)]);
     }
 }

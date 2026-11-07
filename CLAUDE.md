@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `parser-doc.md` — спецификация крейта `parser-core`; `docs/format.md` — актуальный формат JSON (что уже реализовано, что в плане).
 - `plan.md` — план всего проекта (сервер на Axum, `ios-bridge`, iPad-приложение на SwiftUI). Парсер — лишь первая часть.
 
-Реализовано в `parser-core` (этапы 1-4): заголовок, игроки, раунды, снимки каждые 4 тика, экономика, вывод `tickRate`. Дальше по `parser-doc.md` разд. 7: события и бомба (5), гранаты (6), статистика, сборка и эталон, замеры.
+Реализовано в `parser-core` (этапы 1-5): заголовок, игроки, раунды, снимки каждые 4 тика, экономика, вывод `tickRate`, события (убийства, урон, ослепления) и бомба, включая брошенную. Дальше по `parser-doc.md` разд. 7: гранаты (6), статистика, сборка и эталон, замеры.
 
 Команды: `cargo test -p parser-core` (интеграционный тест пропускается без `samples/test_demo.dem`, демки в git не лежат); `cargo run --release -p parser-core --example header -- samples/test_demo.dem` печатает полный JSON; примеры `events` и `ticks` — отладочные дампы сырых данных demoparser2.
 

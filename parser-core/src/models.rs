@@ -63,6 +63,8 @@ pub struct Round {
     pub teams: Vec<Option<Team>>,
     /// Per-player data, indexed by `Player::index`.
     pub tracks: Vec<PlayerTrack>,
+    pub events: RoundEvents,
+    pub bomb: Bomb,
     /// Raw `round_end` reason from the game (1 bomb exploded, 7 defused, 8 CTs
     /// eliminated, 9 Ts eliminated, 18 CT surrender, ...). Unknown values pass through.
     pub reason: i32,
@@ -94,3 +96,72 @@ pub struct PlayerTrack {
 /// Item ids index `Match::weapons`. Recorded on the first snapshot and whenever it changes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct InventoryChange(pub u32, pub i32, pub u8, pub Vec<u32>);
+
+/// Short event lists of one round. A round covers `[start_tick, next round's start_tick)`,
+/// so events after `round_end` (e.g. post-round kills) stay with their round.
+/// Player fields are `Player::index`, or -1 for "none" (world damage, no assister).
+/// Weapon ids index `Match::weapons`; event weapons use the game's internal names
+/// (`ak47`, `hegrenade`) which differ from inventory names (`AK-47`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RoundEvents {
+    pub kills: Vec<Kill>,
+    pub damage: Vec<Damage>,
+    pub blinds: Vec<Blind>,
+}
+
+/// `[tick, killer, victim, assister, weapon, flags]`. flags: 1 headshot, 2 through smoke,
+/// 4 wallbang, 8 no-scope, 16 attacker blind, 32 flash assist.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Kill(pub i32, pub i32, pub u32, pub i32, pub u32, pub u8);
+
+pub const KILL_HEADSHOT: u8 = 1;
+pub const KILL_THROUGH_SMOKE: u8 = 2;
+pub const KILL_WALLBANG: u8 = 4;
+pub const KILL_NO_SCOPE: u8 = 8;
+pub const KILL_ATTACKER_BLIND: u8 = 16;
+pub const KILL_FLASH_ASSIST: u8 = 32;
+
+/// `[tick, attacker, victim, weapon, health damage, armor damage, victim hp after]`.
+/// Health damage is the raw game value (may exceed the victim's remaining hp).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Damage(pub i32, pub i32, pub u32, pub u32, pub u32, pub u32, pub u32);
+
+/// `[tick, thrower, victim, blind duration in ms]`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Blind(pub i32, pub i32, pub u32, pub u32);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BombEnd {
+    Exploded,
+    Defused,
+}
+
+/// Position (tenths of a unit) of an object at a tick.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BombSpot(pub i32, pub u32, pub i32, pub i32, pub i32);
+
+/// Bomb of one round. Plant/end fields are `null` when it never happened.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Bomb {
+    pub plant_tick: Option<i32>,
+    pub x: Option<i32>,
+    pub y: Option<i32>,
+    pub z: Option<i32>,
+    pub planter: Option<u32>,
+    pub end_tick: Option<i32>,
+    pub end_type: Option<BombEnd>,
+    pub defuser: Option<u32>,
+    /// Who holds the bomb before the plant: `[snapshot index, player index]`, player -1 = lying
+    /// on the ground. Recorded on the first snapshot and on every change.
+    pub carrier: Vec<(u32, i32)>,
+    /// Bomb position at each snapshot from the round start until the plant (a prefix of
+    /// `Round::ticks`): the carrier's position, or where it was dropped.
+    pub track_x: Vec<i32>,
+    pub track_y: Vec<i32>,
+    pub track_z: Vec<i32>,
+    /// `[tick, player, x, y, z]`: where the bomb was dropped and where it was picked up.
+    pub drops: Vec<BombSpot>,
+    pub pickups: Vec<BombSpot>,
+}

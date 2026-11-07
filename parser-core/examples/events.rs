@@ -6,7 +6,9 @@ use parser::parse_demo::{Parser, ParsingMode};
 use parser::second_pass::parser_settings::create_huffman_lookup_table;
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: events <demo.dem>");
+    let mut args = std::env::args().skip(1);
+    let path = args.next().expect("usage: events <demo.dem> [event names...]");
+    let wanted: Vec<String> = args.collect();
     let file = std::fs::File::open(path).unwrap();
     let mmap = unsafe { MmapOptions::new().map(&file).unwrap() };
     let huf = create_huffman_lookup_table();
@@ -17,8 +19,7 @@ fn main() {
         wanted_other_props: vec![],
         wanted_prop_states: AHashMap::default(),
         wanted_ticks: vec![],
-        wanted_events: ["round_start", "round_freeze_end", "round_end", "round_officially_ended", "begin_new_match", "cs_win_panel_match"]
-            .iter().map(|s| s.to_string()).collect(),
+        wanted_events: if wanted.is_empty() { ["round_start", "round_freeze_end", "round_end", "begin_new_match"].map(String::from).to_vec() } else { wanted },
         parse_ents: true,
         parse_projectiles: false,
         parse_grenades: false,
