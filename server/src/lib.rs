@@ -4,6 +4,7 @@ pub mod api;
 pub mod config;
 pub mod error;
 pub mod state;
+pub mod storage;
 
 use axum::routing::get;
 use axum::Router;
