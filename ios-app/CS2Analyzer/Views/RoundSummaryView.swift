@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// Сводка одного раунда (этап I2): без повтора — только `round.summary` и исход.
-/// Сам повтор (радар, таймлайн, гранаты, бомба) — этапы I3-I4.
+/// Сводка одного раунда: исход, `round.summary` и статичный радар одного снимка
+/// (этап I3). Сам повтор (анимация, таймлайн, гранаты, бомба) — этап I4.
 struct RoundSummaryView: View {
     let match: MatchModel
     let round: Round
@@ -16,6 +16,9 @@ struct RoundSummaryView: View {
                 LabeledContent("Тики", value: "\(round.startTick)...\(round.endTick)")
                 if round.bomb.plantTick != nil {
                     LabeledContent("Бомба", value: bombOutcome)
+                }
+                NavigationLink("Радар") {
+                    RadarView(match: match, round: round)
                 }
             }
 
