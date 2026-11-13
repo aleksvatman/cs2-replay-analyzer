@@ -84,4 +84,10 @@ enum LocalParser {
         defer { cs2_string_free(pointer) }
         return String(cString: pointer)
     }
+
+    /// Версия крейта `ios-bridge` (`Cargo.toml`), для экрана диагностики (этап I6). Строка
+    /// статическая ('static в Rust) — в отличие от `cs2_last_error`, её не нужно освобождать.
+    static var bridgeVersion: String {
+        String(cString: cs2_bridge_version())
+    }
 }
