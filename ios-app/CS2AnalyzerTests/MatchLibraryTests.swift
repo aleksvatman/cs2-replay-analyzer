@@ -4,9 +4,19 @@ import XCTest
 /// Тесты на подложенные вручную матчи (этап I2). Тест hosted (`TEST_HOST`), поэтому
 /// `Bundle.main` внутри него — это бандл приложения `CS2Analyzer`, с тем же
 /// `Resources/SampleMatches`, что видит сама `MatchLibrary`.
+///
+/// Каждый тест даёт `MatchLibrary` свой временный `MatchStore` (не настоящий кэш
+/// `Application Support`) — иначе матчи, разобранные вручную при проверке на симуляторе
+/// (этап I9), попали бы в `items` и сломали бы точные проверки количества ниже.
 final class MatchLibraryTests: XCTestCase {
+    private func makeIsolatedLibrary() -> MatchLibrary {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("match-library-test-\(UUID().uuidString)", isDirectory: true)
+        return MatchLibrary(store: MatchStore(rootDirectory: tempDir))
+    }
+
     func testLoadsBundledSampleMatches() {
-        let library = MatchLibrary()
+        let library = makeIsolatedLibrary()
 
         XCTAssertEqual(library.loadErrors, [])
         XCTAssertEqual(library.items.count, 2)
@@ -29,7 +39,7 @@ final class MatchLibraryTests: XCTestCase {
     }
 
     func testPlayerNameLookup() throws {
-        let library = MatchLibrary()
+        let library = makeIsolatedLibrary()
         let match = try XCTUnwrap(library.match(for: "sample-mirage"))
         let firstPlayer = try XCTUnwrap(match.players.first)
 

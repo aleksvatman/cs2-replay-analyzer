@@ -7,6 +7,11 @@
 # (`cargo install cbindgen`).
 set -euo pipefail
 
+# Xcode build phases run with a minimal PATH that doesn't include rustup's shims (cargo,
+# cbindgen); add the usual install location so this script works both from a terminal and as
+# an Xcode "Run Script" build phase (see ios-app, stage I9).
+export PATH="$HOME/.cargo/bin:$PATH"
+
 cd "$(dirname "${BASH_SOURCE[0]}")"
 
 CRATE_DIR="$(pwd)"
