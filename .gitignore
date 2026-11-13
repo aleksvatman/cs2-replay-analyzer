@@ -1,3 +1,9 @@
 /target
 # large sample demos (58 MB); keep out of git history
 /samples/*.dem
+
+# Xcode
+xcuserdata/
+DerivedData/
+/ios-app/build/
+.DS_Store
