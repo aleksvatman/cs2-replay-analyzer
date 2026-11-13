@@ -12,9 +12,15 @@ final class WeaponNamesTests: XCTestCase {
         XCTAssertEqual(WeaponNames.displayName("some_future_weapon"), "some_future_weapon")
     }
 
-    func testIconsAreAssignedByCategory() {
-        XCTAssertEqual(WeaponNames.icon("ak47"), .rifle)
-        XCTAssertEqual(WeaponNames.icon("awp"), .sniper)
+    /// Всё огнестрельное оружие — одна и та же иконка прицела (чтобы в ленте убийств
+    /// пистолеты не выделялись «просто кружком» на фоне остального оружия).
+    func testFirearmsShareTheSameIcon() {
+        XCTAssertEqual(WeaponNames.icon("glock"), .gun)
+        XCTAssertEqual(WeaponNames.icon("ak47"), .gun)
+        XCTAssertEqual(WeaponNames.icon("awp"), .gun)
+    }
+
+    func testNonFirearmIconsAreDistinct() {
         XCTAssertEqual(WeaponNames.icon("hegrenade"), .grenade)
         XCTAssertEqual(WeaponNames.icon("knife"), .knife)
         XCTAssertEqual(WeaponNames.icon("world"), .world)

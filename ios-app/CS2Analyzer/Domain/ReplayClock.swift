@@ -10,7 +10,7 @@ final class ReplayClock {
         case half = 0.5
         case normal = 1
         case double = 2
-        case quad = 4
+        case triple = 3
 
         var id: Double { rawValue }
 
@@ -20,7 +20,7 @@ final class ReplayClock {
             case .half: return "0.5×"
             case .normal: return "1×"
             case .double: return "2×"
-            case .quad: return "4×"
+            case .triple: return "3×"
             }
         }
     }

@@ -26,12 +26,18 @@ struct ReplayView: View {
     }
 
     var body: some View {
-        VStack(spacing: 12) {
+        Group {
             if let calibration {
                 if let image = Self.loadImage(calibration) {
-                    radar(calibration: calibration, image: image)
-                    controls
-                    killFeed
+                    HStack(alignment: .top, spacing: 16) {
+                        VStack(spacing: 12) {
+                            radar(calibration: calibration, image: image)
+                            controls
+                            killFeed
+                        }
+                        legend
+                            .frame(width: 200)
+                    }
                 } else {
                     ContentUnavailableView(
                         "Нет картинки радара",
@@ -84,7 +90,7 @@ struct ReplayView: View {
         let projection = RadarProjection(calibration: calibration)
         let pixelsPerUnit = side / CGFloat(calibration.imageSize)
         let tick = clock.tick
-        let snapshotIndex = clock.snapshotIndex()
+        let interpolation = SnapshotInterpolation(tick: tick, startTick: round.startTick, step: 4)
 
         func pixel(x: Int, y: Int) -> CGPoint {
             let raw = projection.point(x: x, y: y)
@@ -92,29 +98,68 @@ struct ReplayView: View {
         }
 
         drawGrenades(context: context, tick: tick, pixel: pixel)
-        drawBomb(context: context, tick: tick, snapshotIndex: snapshotIndex, pixel: pixel)
-        drawPlayers(context: context, tick: tick, snapshotIndex: snapshotIndex, pixel: pixel)
+        drawBomb(context: context, tick: tick, interpolation: interpolation, pixel: pixel)
+        drawPlayers(context: context, tick: tick, interpolation: interpolation, pixel: pixel)
         drawRecentKills(context: context, tick: tick, pixel: pixel)
     }
 
+    /// Снимки идут раз в 4 тика (`ipad-doc.md` разд. 7, 16 кадров в секунду); на глаз это
+    /// заметно дёргается даже на 1x, поэтому позиции и углы (`PlayerTrack`, `Bomb.trackX/Y/Z`)
+    /// интерполируются между соседними снимками по доле тика между ними.
+    private struct SnapshotInterpolation {
+        let index0: Int
+        let index1: Int
+        let fraction: Double
+
+        init(tick: Int, startTick: Int, step: Int) {
+            let offset = max(0, tick - startTick)
+            index0 = offset / step
+            index1 = index0 + 1
+            fraction = Double(offset % step) / Double(step)
+        }
+
+        func point(x: [Int], y: [Int]) -> CGPoint? {
+            guard x.indices.contains(index0) else { return nil }
+            let i1 = min(index1, x.count - 1)
+            let x0 = Double(x[index0]), y0 = Double(y[index0])
+            let x1 = Double(x[i1]), y1 = Double(y[i1])
+            return CGPoint(
+                x: x0 + (x1 - x0) * fraction,
+                y: y0 + (y1 - y0) * fraction
+            )
+        }
+
+        /// Угол через 360° по кратчайшему пути (десятые градуса на входе).
+        func angleRadians(_ values: [Int]) -> Double? {
+            guard values.indices.contains(index0) else { return nil }
+            let i1 = min(index1, values.count - 1)
+            let a0 = Double(values[index0]) / 10
+            let a1 = Double(values[i1]) / 10
+            var delta = a1 - a0
+            delta -= (360 * (delta / 360).rounded(.toNearestOrAwayFromZero))
+            return (a0 + delta * fraction) * .pi / 180
+        }
+    }
+
     private func drawPlayers(
-        context: GraphicsContext, tick: Int, snapshotIndex: Int, pixel: (Int, Int) -> CGPoint
+        context: GraphicsContext, tick: Int, interpolation: SnapshotInterpolation, pixel: (Int, Int) -> CGPoint
     ) {
         var context = context
         guard round.teams.count == match.players.count, round.tracks.count == match.players.count else {
             return
         }
-        let index = min(snapshotIndex, max(round.ticks.count - 1, 0))
+        let hpIndex = min(interpolation.index0, max(round.ticks.count - 1, 0))
 
         for player in match.players {
             guard let team = round.teams[player.index] else { continue }
             let track = round.tracks[player.index]
-            guard track.x.indices.contains(index) else { continue }
+            guard let gamePoint = interpolation.point(x: track.x, y: track.y),
+                  track.hp.indices.contains(hpIndex) else { continue }
 
-            let point = pixel(track.x[index], track.y[index])
+            let point = pixel(Int(gamePoint.x.rounded()), Int(gamePoint.y.rounded()))
             // Последнее убийство раунда приходит на тик `round_end` и в `hp` не видно —
             // смерть определяем и по `events.kills`, а не только по `hp == 0`.
-            let alive = track.hp[index] > 0 && !hasDiedBy(playerIndex: player.index, tick: tick)
+            let alive = track.hp[hpIndex] > 0 && !hasDiedBy(playerIndex: player.index, tick: tick)
             let blinded = isBlinded(playerIndex: player.index, tick: tick)
             let color: Color = team == .t ? .orange : .blue
 
@@ -127,9 +172,7 @@ struct ReplayView: View {
             context.fill(Path(ellipseIn: dotRect), with: .color(color))
             context.stroke(Path(ellipseIn: dotRect), with: .color(blinded ? .yellow : .white), lineWidth: blinded ? 3 : 1)
 
-            if alive, track.yaw.indices.contains(index) {
-                let yawDegrees = Double(track.yaw[index]) / 10
-                let yawRadians = yawDegrees * .pi / 180
+            if alive, let yawRadians = interpolation.angleRadians(track.yaw) {
                 let lineLength: CGFloat = 14
                 let end = CGPoint(
                     x: point.x + lineLength * CGFloat(cos(yawRadians)),
@@ -201,7 +244,7 @@ struct ReplayView: View {
     /// Бомба: до установки следует позицию несущего игрока по `trackX/Y/Z` (шаг снимков
     /// раунда), после установки — неподвижна в точке `bomb.x/y`.
     private func drawBomb(
-        context: GraphicsContext, tick: Int, snapshotIndex: Int, pixel: (Int, Int) -> CGPoint
+        context: GraphicsContext, tick: Int, interpolation: SnapshotInterpolation, pixel: (Int, Int) -> CGPoint
     ) {
         var context = context
         let bomb = round.bomb
@@ -209,10 +252,8 @@ struct ReplayView: View {
 
         if let plantTick = bomb.plantTick, tick >= plantTick, let x = bomb.x, let y = bomb.y {
             point = pixel(x, y)
-        } else if !bomb.trackX.isEmpty {
-            let index = min(snapshotIndex, bomb.trackX.count - 1)
-            guard index >= 0 else { return }
-            point = pixel(bomb.trackX[index], bomb.trackY[index])
+        } else if let gamePoint = interpolation.point(x: bomb.trackX, y: bomb.trackY) {
+            point = pixel(Int(gamePoint.x.rounded()), Int(gamePoint.y.rounded()))
         }
 
         guard let point else { return }
@@ -363,6 +404,70 @@ struct ReplayView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    // MARK: - Легенда
+
+    private struct LegendRow: Identifiable {
+        let id = UUID()
+        let swatch: AnyView
+        let text: String
+    }
+
+    private func legendDot(_ color: Color) -> AnyView {
+        AnyView(Circle().fill(color).frame(width: 12, height: 12))
+    }
+
+    private func legendIcon(_ name: String) -> AnyView {
+        AnyView(Image(systemName: name).frame(width: 12, height: 12))
+    }
+
+    private func legendLine(_ color: Color, dashed: Bool = false) -> AnyView {
+        AnyView(
+            Rectangle()
+                .fill(color)
+                .frame(width: 16, height: dashed ? 1 : 2)
+        )
+    }
+
+    private var legendRows: [LegendRow] {
+        [
+            LegendRow(swatch: legendDot(.orange), text: "Игрок, T"),
+            LegendRow(swatch: legendDot(.blue), text: "Игрок, CT"),
+            LegendRow(swatch: legendIcon("circle.dashed"), text: "Тусклая точка — мёртв"),
+            LegendRow(swatch: legendLine(.orange), text: "Линия от точки — направление взгляда"),
+            LegendRow(swatch: legendIcon("circle.circle"), text: "Жёлтое кольцо — ослеплён"),
+            LegendRow(swatch: legendDot(.red), text: "Бомба (квадрат)"),
+            LegendRow(swatch: legendLine(.red, dashed: true), text: "Линия — убийство (затухает)"),
+            LegendRow(swatch: legendDot(.gray), text: "Дымовая граната / область дыма"),
+            LegendRow(swatch: legendDot(.red), text: "HE-граната"),
+            LegendRow(swatch: legendDot(.yellow), text: "Флешбанг"),
+            LegendRow(swatch: legendDot(.orange), text: "Молотов/зажигательная, область огня"),
+            LegendRow(swatch: legendDot(.purple), text: "Муляж (decoy)"),
+            LegendRow(swatch: legendIcon(WeaponNames.Icon.gun.rawValue), text: "Убийство из оружия"),
+            LegendRow(swatch: legendIcon("staroflife.fill"), text: "Хедшот"),
+        ]
+    }
+
+    private var legend: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Обозначения").font(.headline)
+                ForEach(legendRows) { row in
+                    HStack(spacing: 8) {
+                        row.swatch
+                        Text(row.text).font(.caption)
+                    }
+                }
+                Divider()
+                Text("Отметки на таймлайне").font(.subheadline.bold())
+                HStack(spacing: 8) { legendDot(.red); Text("Убийство").font(.caption) }
+                HStack(spacing: 8) { legendDot(.green); Text("Конец заморозки").font(.caption) }
+                HStack(spacing: 8) { legendDot(.yellow); Text("Установка бомбы").font(.caption) }
+                HStack(spacing: 8) { legendDot(.blue); Text("Разминирование").font(.caption) }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
     }
 
     private func playerName(_ index: Int) -> String {
