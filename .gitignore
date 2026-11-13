@@ -6,6 +6,7 @@
 xcuserdata/
 DerivedData/
 /ios-app/build/
+/ios-bridge/build/
 .DS_Store
 
 # радары карт — из файлов игры (авторские права Valve), см.

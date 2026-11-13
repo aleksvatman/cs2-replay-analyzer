@@ -1,3 +1,3 @@
 [workspace]
 resolver = "2"
-members = ["parser-core", "server"]
+members = ["parser-core", "server", "ios-bridge"]
