@@ -29,14 +29,14 @@ struct ReplayView: View {
         Group {
             if let calibration {
                 if let image = Self.loadImage(calibration) {
-                    HStack(alignment: .top, spacing: 16) {
-                        VStack(spacing: 12) {
-                            radar(calibration: calibration, image: image)
-                            controls
+                    VStack(spacing: 12) {
+                        radar(calibration: calibration, image: image)
+                        controls
+                        HStack(alignment: .top, spacing: 16) {
                             killFeed
+                            legend
+                                .frame(width: 200)
                         }
-                        legend
-                            .frame(width: 200)
                     }
                 } else {
                     ContentUnavailableView(
@@ -418,56 +418,45 @@ struct ReplayView: View {
         AnyView(Circle().fill(color).frame(width: 12, height: 12))
     }
 
-    private func legendIcon(_ name: String) -> AnyView {
-        AnyView(Image(systemName: name).frame(width: 12, height: 12))
-    }
-
-    private func legendLine(_ color: Color, dashed: Bool = false) -> AnyView {
-        AnyView(
-            Rectangle()
-                .fill(color)
-                .frame(width: 16, height: dashed ? 1 : 2)
-        )
-    }
-
     private var legendRows: [LegendRow] {
         [
-            LegendRow(swatch: legendDot(.orange), text: "Игрок, T"),
-            LegendRow(swatch: legendDot(.blue), text: "Игрок, CT"),
-            LegendRow(swatch: legendIcon("circle.dashed"), text: "Тусклая точка — мёртв"),
-            LegendRow(swatch: legendLine(.orange), text: "Линия от точки — направление взгляда"),
-            LegendRow(swatch: legendIcon("circle.circle"), text: "Жёлтое кольцо — ослеплён"),
             LegendRow(swatch: legendDot(.red), text: "Бомба (квадрат)"),
-            LegendRow(swatch: legendLine(.red, dashed: true), text: "Линия — убийство (затухает)"),
             LegendRow(swatch: legendDot(.gray), text: "Дымовая граната / область дыма"),
             LegendRow(swatch: legendDot(.red), text: "HE-граната"),
             LegendRow(swatch: legendDot(.yellow), text: "Флешбанг"),
             LegendRow(swatch: legendDot(.orange), text: "Молотов/зажигательная, область огня"),
             LegendRow(swatch: legendDot(.purple), text: "Муляж (decoy)"),
-            LegendRow(swatch: legendIcon(WeaponNames.Icon.gun.rawValue), text: "Убийство из оружия"),
-            LegendRow(swatch: legendIcon("staroflife.fill"), text: "Хедшот"),
+        ]
+    }
+
+    private var timelineLegendRows: [LegendRow] {
+        [
+            LegendRow(swatch: legendDot(.red), text: "Убийство"),
+            LegendRow(swatch: legendDot(.green), text: "Конец заморозки"),
+            LegendRow(swatch: legendDot(.yellow), text: "Установка бомбы"),
+            LegendRow(swatch: legendDot(.blue), text: "Разминирование"),
         ]
     }
 
     private var legend: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Обозначения").font(.headline)
-                ForEach(legendRows) { row in
-                    HStack(spacing: 8) {
-                        row.swatch
-                        Text(row.text).font(.caption)
-                    }
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Гранаты и бомба").font(.headline)
+            ForEach(legendRows) { row in
+                HStack(spacing: 8) {
+                    row.swatch
+                    Text(row.text).font(.caption)
                 }
-                Divider()
-                Text("Отметки на таймлайне").font(.subheadline.bold())
-                HStack(spacing: 8) { legendDot(.red); Text("Убийство").font(.caption) }
-                HStack(spacing: 8) { legendDot(.green); Text("Конец заморозки").font(.caption) }
-                HStack(spacing: 8) { legendDot(.yellow); Text("Установка бомбы").font(.caption) }
-                HStack(spacing: 8) { legendDot(.blue); Text("Разминирование").font(.caption) }
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
+            Divider()
+            Text("Отметки на таймлайне").font(.subheadline.bold())
+            ForEach(timelineLegendRows) { row in
+                HStack(spacing: 8) {
+                    row.swatch
+                    Text(row.text).font(.caption)
+                }
+            }
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func playerName(_ index: Int) -> String {

@@ -29,15 +29,23 @@ final class ReplayClock {
     let endTick: Int
     private let tickRate: Int
 
-    private(set) var tick: Int
+    /// Тик с дробной частью: `tickRate` — это ticks/с из демки (`MatchModel.tickRate`), и
+    /// на 1× тик должен расти ровно на `tickRate` в секунду, то есть воспроизведение идёт
+    /// в реальном времени раунда. Копить остаток нужно именно в `Double`: округление до
+    /// `Int` на каждом кадре таймера (30 Гц) систематически отстаёт от реального тика —
+    /// на коротких интервалах незаметно, но за весь раунд набегает заметное отставание,
+    /// и 1× выглядит медленнее настоящего темпа игры.
+    private var preciseTick: Double
     var isPlaying: Bool = false
     var speed: Speed = .normal
+
+    var tick: Int { Int(preciseTick) }
 
     init(startTick: Int, endTick: Int, tickRate: Int) {
         self.startTick = startTick
         self.endTick = max(endTick, startTick)
         self.tickRate = max(tickRate, 1)
-        self.tick = startTick
+        self.preciseTick = Double(startTick)
     }
 
     /// Индекс снимка (шаг `step` тиков, в формате это 4) для текущего тика — не позже него.
@@ -46,7 +54,7 @@ final class ReplayClock {
     }
 
     func seek(toTick newTick: Int) {
-        tick = newTick.clamped(to: startTick...endTick)
+        preciseTick = Double(newTick.clamped(to: startTick...endTick))
         if tick >= endTick {
             isPlaying = false
         }
@@ -57,18 +65,18 @@ final class ReplayClock {
     func advance(by deltaSeconds: Double) {
         guard isPlaying, deltaSeconds > 0 else { return }
         let deltaTicks = deltaSeconds * Double(tickRate) * speed.rawValue
-        let newTick = Double(tick) + deltaTicks
+        let newTick = preciseTick + deltaTicks
         if newTick >= Double(endTick) {
-            tick = endTick
+            preciseTick = Double(endTick)
             isPlaying = false
         } else {
-            tick = max(startTick, Int(newTick))
+            preciseTick = max(Double(startTick), newTick)
         }
     }
 
     func togglePlay() {
         if tick >= endTick {
-            tick = startTick
+            preciseTick = Double(startTick)
         }
         isPlaying.toggle()
     }

@@ -61,4 +61,26 @@ final class ReplayClockTests: XCTestCase {
         XCTAssertEqual(clock.tick, 0)
         XCTAssertTrue(clock.isPlaying)
     }
+
+    /// На 1x один игровой тик должен соответствовать ровно 1/`tickRate` реального времени,
+    /// то есть раунд проигрывается в реальном времени. `advance(by:)` вызывается часто
+    /// маленькими шагами (как таймер на 30 Гц), чтобы проверить именно накопленную ошибку
+    /// округления за весь раунд, а не один большой шаг.
+    func testRealTimePlaybackMatchesRoundDurationAtNormalSpeed() {
+        let tickRate = 64
+        let roundTicks = 8904
+        let clock = ReplayClock(startTick: 0, endTick: roundTicks, tickRate: tickRate)
+        clock.isPlaying = true
+
+        let frameSeconds = 1.0 / 30.0
+        let expectedSeconds = Double(roundTicks) / Double(tickRate)
+        var elapsed = 0.0
+        while clock.isPlaying {
+            clock.advance(by: frameSeconds)
+            elapsed += frameSeconds
+        }
+
+        XCTAssertEqual(clock.tick, roundTicks)
+        XCTAssertEqual(elapsed, expectedSeconds, accuracy: frameSeconds)
+    }
 }
