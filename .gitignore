@@ -7,3 +7,7 @@ xcuserdata/
 DerivedData/
 /ios-app/build/
 .DS_Store
+
+# радары карт — из файлов игры (авторские права Valve), см.
+# ios-app/CS2Analyzer/Resources/Maps/README.md
+/ios-app/CS2Analyzer/Resources/Maps/*.png

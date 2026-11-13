@@ -14,16 +14,25 @@
 			remoteGlobalIDString = A10000000000000000000006;
 			remoteInfo = CS2Analyzer;
 		};
+		A30000000000000000000003 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = A10000000000000000000009 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = A10000000000000000000006;
+			remoteInfo = CS2Analyzer;
+		};
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		A10000000000000000000001 /* CS2Analyzer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CS2Analyzer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000000000000000000001 /* CS2AnalyzerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CS2AnalyzerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A30000000000000000000001 /* CS2AnalyzerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CS2AnalyzerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		A10000000000000000000002 /* CS2Analyzer */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = CS2Analyzer; sourceTree = "<group>"; };
 		A20000000000000000000002 /* CS2AnalyzerTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = CS2AnalyzerTests; sourceTree = "<group>"; };
+		A30000000000000000000002 /* CS2AnalyzerUITests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = CS2AnalyzerUITests; sourceTree = "<group>"; };
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -41,6 +50,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A30000000000000000000008 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -49,6 +65,7 @@
 			children = (
 				A10000000000000000000002 /* CS2Analyzer */,
 				A20000000000000000000002 /* CS2AnalyzerTests */,
+				A30000000000000000000002 /* CS2AnalyzerUITests */,
 				A10000000000000000000005 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -58,6 +75,7 @@
 			children = (
 				A10000000000000000000001 /* CS2Analyzer.app */,
 				A20000000000000000000001 /* CS2AnalyzerTests.xctest */,
+				A30000000000000000000001 /* CS2AnalyzerUITests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -106,6 +124,27 @@
 			productReference = A20000000000000000000001 /* CS2AnalyzerTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		A30000000000000000000005 /* CS2AnalyzerUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A30000000000000000000006 /* Build configuration list for PBXNativeTarget "CS2AnalyzerUITests" */;
+			buildPhases = (
+				A30000000000000000000007 /* Sources */,
+				A30000000000000000000008 /* Frameworks */,
+				A30000000000000000000009 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				A30000000000000000000004 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				A30000000000000000000002 /* CS2AnalyzerUITests */,
+			);
+			name = CS2AnalyzerUITests;
+			productName = CS2AnalyzerUITests;
+			productReference = A30000000000000000000001 /* CS2AnalyzerUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -120,6 +159,10 @@
 						CreatedOnToolsVersion = 16.2;
 					};
 					A20000000000000000000005 = {
+						CreatedOnToolsVersion = 16.2;
+						TestTargetID = A10000000000000000000006;
+					};
+					A30000000000000000000005 = {
 						CreatedOnToolsVersion = 16.2;
 						TestTargetID = A10000000000000000000006;
 					};
@@ -142,6 +185,7 @@
 			targets = (
 				A10000000000000000000006 /* CS2Analyzer */,
 				A20000000000000000000005 /* CS2AnalyzerTests */,
+				A30000000000000000000005 /* CS2AnalyzerUITests */,
 			);
 		};
 /* End PBXProject section */
@@ -155,6 +199,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		A20000000000000000000009 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A30000000000000000000009 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -178,6 +229,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		A30000000000000000000007 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -185,6 +243,11 @@
 			isa = PBXTargetDependency;
 			target = A10000000000000000000006 /* CS2Analyzer */;
 			targetProxy = A20000000000000000000003 /* PBXContainerItemProxy */;
+		};
+		A30000000000000000000004 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = A10000000000000000000006 /* CS2Analyzer */;
+			targetProxy = A30000000000000000000003 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -331,6 +394,44 @@
 			};
 			name = Release;
 		};
+		A3000000000000000000000A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6DBN9M4Q4Q;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.avatman.cs2analyzer.UITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 2;
+				TEST_TARGET_NAME = CS2Analyzer;
+			};
+			name = Debug;
+		};
+		A3000000000000000000000B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 6DBN9M4Q4Q;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 0.1;
+				PRODUCT_BUNDLE_IDENTIFIER = com.avatman.cs2analyzer.UITests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = 2;
+				TEST_TARGET_NAME = CS2Analyzer;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -357,6 +458,15 @@
 			buildConfigurations = (
 				A2000000000000000000000A /* Debug */,
 				A2000000000000000000000B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A30000000000000000000006 /* Build configuration list for PBXNativeTarget "CS2AnalyzerUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A3000000000000000000000A /* Debug */,
+				A3000000000000000000000B /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
