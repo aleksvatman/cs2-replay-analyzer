@@ -1,0 +1,16 @@
+[package]
+name = "ios-bridge"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+# staticlib for the iOS build (linked into the app via an .xcframework); rlib so
+# `cargo test` and tools on the host can still use this crate directly.
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+parser-core = { path = "../parser-core" }
+flate2 = "1"
+
+[dev-dependencies]
+serde_json = "1"

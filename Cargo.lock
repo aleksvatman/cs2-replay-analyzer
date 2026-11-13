@@ -469,6 +469,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ios-bridge"
+version = "0.1.0"
+dependencies = [
+ "flate2",
+ "parser-core",
+ "serde_json",
+]
+
+[[package]]
 name = "itertools"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
