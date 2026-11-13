@@ -6,16 +6,6 @@
 	objectVersion = 70;
 	objects = {
 
-/* Begin PBXFileReference section */
-		A10000000000000000000001 /* CS2Analyzer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CS2Analyzer.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A20000000000000000000001 /* CS2AnalyzerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CS2AnalyzerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-/* End PBXFileReference section */
-
-/* Begin PBXFileSystemSynchronizedRootGroup section */
-		A10000000000000000000002 /* CS2Analyzer */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = CS2Analyzer; sourceTree = "<group>"; };
-		A20000000000000000000002 /* CS2AnalyzerTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = CS2AnalyzerTests; sourceTree = "<group>"; };
-/* End PBXFileSystemSynchronizedRootGroup section */
-
 /* Begin PBXContainerItemProxy section */
 		A20000000000000000000003 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -25,6 +15,16 @@
 			remoteInfo = CS2Analyzer;
 		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		A10000000000000000000001 /* CS2Analyzer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CS2Analyzer.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000001 /* CS2AnalyzerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CS2AnalyzerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		A10000000000000000000002 /* CS2Analyzer */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = CS2Analyzer; sourceTree = "<group>"; };
+		A20000000000000000000002 /* CS2AnalyzerTests */ = {isa = PBXFileSystemSynchronizedRootGroup; explicitFileTypes = {}; explicitFolders = (); path = CS2AnalyzerTests; sourceTree = "<group>"; };
+/* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		A10000000000000000000003 /* Frameworks */ = {
