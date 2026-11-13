@@ -1,14 +1,16 @@
 import XCTest
 
-/// UI-тест для визуальной проверки (этап I3): список → раунд → радар, со скриншотом
+/// UI-тест для визуальной проверки: список → раунд → повтор, со скриншотом
 /// каждого экрана (виден в отчёте `xcodebuild test`/Xcode). Это не проверка данных
 /// (то делает `CS2AnalyzerTests`) — только что экран открывается и не падает.
-final class RadarUITests: XCTestCase {
+/// Только на симуляторе: `CS2AnalyzerUITests` на реальном устройстве ставит отдельный
+/// `-Runner.app`, который остаётся лишней иконкой на рабочем столе.
+final class ReplayUITests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
 
-    func testOpenMirageRoundRadar() throws {
+    func testOpenMirageRoundReplay() throws {
         let app = XCUIApplication()
         app.launch()
         attach(app, name: "01-match-list")
@@ -22,18 +24,27 @@ final class RadarUITests: XCTestCase {
         tapRow(app, startingWith: "Раунд 1,", scrollableDetailPane: true)
         attach(app, name: "03-round-summary")
 
-        tapRow(app, startingWith: "Радар")
+        tapRow(app, startingWith: "Повтор")
         waitForRadarScreen(app)
-        attach(app, name: "04-radar")
+        attach(app, name: "04-replay")
+
+        // Кнопка воспроизведения появляется только если есть и калибровка, и картинка
+        // радара (иначе показан `ContentUnavailableView` без элементов управления).
+        let playButton = app.buttons["replay-play-pause"]
+        if playButton.waitForExistence(timeout: 2) {
+            playButton.tap()
+            RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+            attach(app, name: "05-replay-playing")
+        }
     }
 
-    func testOpenAncientRoundRadar() throws {
+    func testOpenAncientRoundReplay() throws {
         let app = XCUIApplication()
         app.launch()
 
         tapRow(app, startingWith: "de_ancient")
         tapRow(app, startingWith: "Раунд 1,", scrollableDetailPane: true)
-        tapRow(app, startingWith: "Радар")
+        tapRow(app, startingWith: "Повтор")
         waitForRadarScreen(app)
         attach(app, name: "ancient-radar")
     }
@@ -41,7 +52,7 @@ final class RadarUITests: XCTestCase {
     /// Либо сама картинка радара, либо явное предупреждение об её отсутствии — падать
     /// в любом случае не должно (см. `Resources/Maps/README.md`).
     private func waitForRadarScreen(_ app: XCUIApplication) {
-        let radarTitle = app.navigationBars["Радар — раунд 1"]
+        let radarTitle = app.navigationBars["Повтор — раунд 1"]
         let missingImageWarning = app.staticTexts["Нет картинки радара"]
         let missingCalibrationWarning = app.staticTexts["Нет калибровки радара"]
         XCTAssertTrue(
