@@ -411,6 +411,7 @@ struct ReplayView: View {
             ForEach(Array(recent.enumerated()), id: \.offset) { _, kill in
                 HStack(spacing: 4) {
                     Text(playerName(kill.killer))
+                        .foregroundStyle(teamColor(for: kill.killer))
                     Image(systemName: WeaponNames.icon(kill.weapon(in: match)).rawValue)
                         .font(.caption2)
                     Text("[\(WeaponNames.displayName(kill.weapon(in: match)))]")
@@ -420,11 +421,20 @@ struct ReplayView: View {
                         Image(systemName: "staroflife.fill").font(.caption2)
                     }
                     Text(playerName(kill.victim))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(teamColor(for: kill.victim))
                 }
                 .font(.caption)
             }
         }
+    }
+
+    /// Цвет команды игрока в этом раунде (как у точки на радаре); `nil` (мир, нет данных
+    /// о стороне) оставляет цвет по умолчанию.
+    private func teamColor(for playerIndex: Int) -> Color {
+        guard round.teams.indices.contains(playerIndex), let team = round.teams[playerIndex] else {
+            return .primary
+        }
+        return team == .t ? .orange : .blue
     }
 
     // MARK: - Легенда
