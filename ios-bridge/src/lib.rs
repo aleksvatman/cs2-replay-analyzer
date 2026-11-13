@@ -209,3 +209,12 @@ pub unsafe extern "C" fn cs2_string_free(s: *mut c_char) {
         drop(CString::from_raw(s));
     }
 }
+
+/// Version of this crate (`Cargo.toml`), for the app's diagnostics screen (stage I6). Unlike
+/// `cs2_last_error`, the returned string is `'static` and must **not** be passed to
+/// `cs2_string_free`.
+#[no_mangle]
+pub extern "C" fn cs2_bridge_version() -> *const c_char {
+    const VERSION: &str = concat!(env!("CARGO_PKG_VERSION"), "\0");
+    VERSION.as_ptr() as *const c_char
+}

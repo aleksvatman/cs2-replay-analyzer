@@ -14,6 +14,7 @@ final class MatchLibrary {
 
     private var matchesById: [String: MatchModel] = [:]
     private let store: MatchStore
+    private let settings: AppSettings
 
     private struct Entry {
         let id: String
@@ -25,8 +26,27 @@ final class MatchLibrary {
         Entry(id: "sample-ancient", resource: "sample_ancient"),
     ]
 
-    init(store: MatchStore = MatchStore()) {
+    init(store: MatchStore = MatchStore(), settings: AppSettings = AppSettings()) {
         self.store = store
+        self.settings = settings
+        reload()
+    }
+
+    /// Суммарный размер кэша в байтах, для экрана настроек.
+    var cacheSizeBytes: Int { store.totalSizeBytes }
+
+    /// Удаляет закэшированный матч вручную (этап I6) — не действует на подложенные вручную
+    /// образцы (`sample-mirage`/`sample-ancient`): их в `store` просто нет.
+    func deleteCached(id: String) {
+        store.delete(id: id)
+        matchesById[id] = nil
+        reload()
+    }
+
+    /// Подгоняет кэш под текущий лимит настроек прямо сейчас — после смены лимита в
+    /// `SettingsView`, не дожидаясь следующего импорта.
+    func enforceCacheLimit() {
+        store.enforceSizeLimit(maxBytes: settings.maxCacheBytes)
         reload()
     }
 
@@ -88,6 +108,7 @@ final class MatchLibrary {
     @discardableResult
     func importDemo(at url: URL, onProgress: @escaping (ParseProgress) -> Void) async throws -> MatchSummary {
         let store = self.store
+        let maxCacheBytes = settings.maxCacheBytes
         let meta = try await Task.detached(priority: .userInitiated) {
             try withDemoFileAccess(url) { localURL -> CachedMatchMeta in
                 let id = try DemoHasher.sha256Hex(ofFileAt: localURL)
@@ -111,6 +132,7 @@ final class MatchLibrary {
                     sizeBytes: gzipped.count
                 )
                 try store.store(id: id, gzippedJSON: gzipped, meta: meta)
+                store.enforceSizeLimit(maxBytes: maxCacheBytes)
                 return meta
             }
         }.value
