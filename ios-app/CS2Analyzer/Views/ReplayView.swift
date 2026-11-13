@@ -72,6 +72,7 @@ struct ReplayView: View {
                     Image(systemName: "list.bullet.circle")
                 }
                 .accessibilityIdentifier("replay-legend-toggle")
+                .accessibilityLabel("Обозначения")
             }
         }
         .inspector(isPresented: $showLegend) {
@@ -100,10 +101,27 @@ struct ReplayView: View {
                     draw(context: context, calibration: calibration, side: side)
                 }
                 .frame(width: side, height: side)
+                .accessibilityLabel(radarAccessibilityLabel)
             }
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
         }
         .aspectRatio(1, contentMode: .fit)
+    }
+
+    /// Canvas непрозрачен для VoiceOver — описываем текущее состояние словами вместо точек.
+    private var radarAccessibilityLabel: String {
+        let interpolation = SnapshotInterpolation(tick: clock.tick, startTick: round.startTick, step: 4)
+        let hpIndex = min(interpolation.index0, max(round.ticks.count - 1, 0))
+        var aliveT = 0, aliveCT = 0
+        for player in match.players {
+            guard round.teams.indices.contains(player.index), let team = round.teams[player.index],
+                  round.tracks.indices.contains(player.index) else { continue }
+            let track = round.tracks[player.index]
+            guard track.hp.indices.contains(hpIndex), track.hp[hpIndex] > 0,
+                  !hasDiedBy(playerIndex: player.index, tick: clock.tick) else { continue }
+            if team == .t { aliveT += 1 } else { aliveCT += 1 }
+        }
+        return "Радар, тик \(clock.tick) из \(round.endTick). Живых T: \(aliveT), живых CT: \(aliveCT)."
     }
 
     private func draw(context: GraphicsContext, calibration: RadarCalibration, side: CGFloat) {
@@ -336,6 +354,7 @@ struct ReplayView: View {
                 }
                 .buttonStyle(.bordered)
                 .accessibilityIdentifier("replay-play-pause")
+                .accessibilityLabel(clock.isPlaying ? "Пауза" : "Воспроизвести")
 
                 Picker("Скорость", selection: Binding(get: { clock.speed }, set: { clock.speed = $0 })) {
                     ForEach(ReplayClock.Speed.allCases) { speed in
@@ -367,6 +386,8 @@ struct ReplayView: View {
             }
             .frame(height: 10)
             .offset(y: -14)
+            // Декоративные отметки поверх слайдера — сам слайдер даёт VoiceOver позицию.
+            .accessibilityHidden(true)
 
             Slider(
                 value: Binding(
@@ -414,18 +435,29 @@ struct ReplayView: View {
                         .foregroundStyle(teamColor(for: kill.killer))
                     Image(systemName: WeaponNames.icon(kill.weapon(in: match)).rawValue)
                         .font(.caption2)
+                        .accessibilityHidden(true)
                     Text("[\(WeaponNames.displayName(kill.weapon(in: match)))]")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                     if kill.flags & Kill.headshot != 0 {
-                        Image(systemName: "staroflife.fill").font(.caption2)
+                        Image(systemName: "staroflife.fill")
+                            .font(.caption2)
+                            .accessibilityHidden(true)
                     }
                     Text(playerName(kill.victim))
                         .foregroundStyle(teamColor(for: kill.victim))
                 }
                 .font(.caption)
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel(killAccessibilityLabel(kill))
             }
         }
+    }
+
+    private func killAccessibilityLabel(_ kill: Kill) -> String {
+        let weapon = WeaponNames.displayName(kill.weapon(in: match))
+        let headshot = kill.flags & Kill.headshot != 0 ? ", в голову" : ""
+        return "\(playerName(kill.killer)) убил \(playerName(kill.victim)) из \(weapon)\(headshot)"
     }
 
     /// Цвет команды игрока в этом раунде (как у точки на радаре); `nil` (мир, нет данных
@@ -446,11 +478,11 @@ struct ReplayView: View {
     }
 
     private func legendDot(_ color: Color) -> AnyView {
-        AnyView(Circle().fill(color).frame(width: 12, height: 12))
+        AnyView(Circle().fill(color).frame(width: 12, height: 12).accessibilityHidden(true))
     }
 
     private func legendIcon(_ name: String) -> AnyView {
-        AnyView(Image(systemName: name).frame(width: 12, height: 12))
+        AnyView(Image(systemName: name).frame(width: 12, height: 12).accessibilityHidden(true))
     }
 
     private func legendLine(_ color: Color, dashed: Bool = false) -> AnyView {
@@ -458,6 +490,7 @@ struct ReplayView: View {
             Rectangle()
                 .fill(color)
                 .frame(width: 16, height: dashed ? 1 : 2)
+                .accessibilityHidden(true)
         )
     }
 

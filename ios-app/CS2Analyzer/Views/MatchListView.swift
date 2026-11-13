@@ -26,7 +26,7 @@ struct MatchListView: View {
                 ContentUnavailableView(
                     "Матчей пока нет",
                     systemImage: "tray",
-                    description: Text("Загрузка демки на сервер и локальный разбор появятся позже.")
+                    description: Text("Локальный разбор демки на устройстве появится позже.")
                 )
             }
         }
@@ -45,6 +45,7 @@ private struct MatchRow: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
     }
 }
 
