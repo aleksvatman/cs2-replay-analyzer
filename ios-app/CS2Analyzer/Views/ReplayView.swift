@@ -482,7 +482,12 @@ struct ReplayView: View {
     }
 
     private func legendIcon(_ name: String) -> AnyView {
-        AnyView(Image(systemName: name).frame(width: 12, height: 12).accessibilityHidden(true))
+        AnyView(
+            Image(systemName: name)
+                .font(.system(size: 11))
+                .frame(width: 12, height: 12)
+                .accessibilityHidden(true)
+        )
     }
 
     private func legendLine(_ color: Color, dashed: Bool = false) -> AnyView {
