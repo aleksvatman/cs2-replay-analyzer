@@ -6,6 +6,10 @@
 	objectVersion = 70;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		A40000000000000000000002 /* IosBridge.xcframework in Frameworks */ = {isa = PBXBuildFile; fileRef = A40000000000000000000001 /* IosBridge.xcframework */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		A20000000000000000000003 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -27,6 +31,7 @@
 		A10000000000000000000001 /* CS2Analyzer.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CS2Analyzer.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000000000000000000001 /* CS2AnalyzerTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CS2AnalyzerTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		A30000000000000000000001 /* CS2AnalyzerUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CS2AnalyzerUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		A40000000000000000000001 /* IosBridge.xcframework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcframework; name = IosBridge.xcframework; path = "../ios-bridge/build/IosBridge.xcframework"; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -40,6 +45,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A40000000000000000000002 /* IosBridge.xcframework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -66,6 +72,7 @@
 				A10000000000000000000002 /* CS2Analyzer */,
 				A20000000000000000000002 /* CS2AnalyzerTests */,
 				A30000000000000000000002 /* CS2AnalyzerUITests */,
+				A40000000000000000000004 /* Frameworks */,
 				A10000000000000000000005 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -80,6 +87,14 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		A40000000000000000000004 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				A40000000000000000000001 /* IosBridge.xcframework */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -87,6 +102,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = A10000000000000000000010 /* Build configuration list for PBXNativeTarget "CS2Analyzer" */;
 			buildPhases = (
+				A40000000000000000000003 /* Build ios-bridge (.xcframework) */,
 				A10000000000000000000007 /* Sources */,
 				A10000000000000000000003 /* Frameworks */,
 				A10000000000000000000008 /* Resources */,
@@ -213,6 +229,25 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		A40000000000000000000003 /* Build ios-bridge (.xcframework) */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+			);
+			name = "Build ios-bridge (.xcframework)";
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			alwaysOutOfDate = 1;
+			shellPath = /bin/sh;
+			shellScript = "set -e\n\"$SRCROOT/../ios-bridge/build-xcframework.sh\"\n";
+			showEnvVarsInLog = 0;
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		A10000000000000000000007 /* Sources */ = {

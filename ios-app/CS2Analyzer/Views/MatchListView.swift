@@ -4,6 +4,7 @@ struct MatchListView: View {
     let items: [MatchSummary]
     let loadErrors: [String]
     @Binding var selection: String?
+    let onImportTapped: () -> Void
 
     var body: some View {
         List(selection: $selection) {
@@ -21,12 +22,20 @@ struct MatchListView: View {
             }
         }
         .navigationTitle("Матчи")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: onImportTapped) {
+                    Label("Добавить демку", systemImage: "plus")
+                }
+                .accessibilityLabel("Добавить демку")
+            }
+        }
         .overlay {
             if items.isEmpty && loadErrors.isEmpty {
                 ContentUnavailableView(
                     "Матчей пока нет",
                     systemImage: "tray",
-                    description: Text("Локальный разбор демки на устройстве появится позже.")
+                    description: Text("Нажмите «+», чтобы разобрать демку на устройстве.")
                 )
             }
         }
@@ -56,7 +65,8 @@ private struct MatchRow: View {
                 MatchSummary(id: "1", map: "de_mirage", scoreT: 11, scoreCT: 13, roundsCount: 24, playersCount: 10),
             ],
             loadErrors: [],
-            selection: .constant(nil)
+            selection: .constant(nil),
+            onImportTapped: {}
         )
     }
 }
