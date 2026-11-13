@@ -80,5 +80,6 @@ private struct PlayerRoundRow: View {
                     .clipShape(Capsule())
             }
         }
+        .accessibilityElement(children: .combine)
     }
 }

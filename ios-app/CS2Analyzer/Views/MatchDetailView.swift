@@ -63,6 +63,7 @@ private struct PlayerStatsRow: View {
             .foregroundStyle(.secondary)
         }
         .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -85,5 +86,6 @@ private struct RoundRow: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }
+        .accessibilityElement(children: .combine)
     }
 }
