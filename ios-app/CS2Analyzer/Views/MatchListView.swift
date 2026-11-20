@@ -5,6 +5,7 @@ struct MatchListView: View {
     let loadErrors: [String]
     @Binding var selection: String?
     let onImportTapped: () -> Void
+    let onSettingsTapped: () -> Void
 
     var body: some View {
         List(selection: $selection) {
@@ -28,6 +29,12 @@ struct MatchListView: View {
                     Label("Добавить демку", systemImage: "plus")
                 }
                 .accessibilityLabel("Добавить демку")
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button(action: onSettingsTapped) {
+                    Label("Настройки", systemImage: "gearshape")
+                }
+                .accessibilityLabel("Настройки")
             }
         }
         .overlay {
@@ -66,7 +73,8 @@ private struct MatchRow: View {
             ],
             loadErrors: [],
             selection: .constant(nil),
-            onImportTapped: {}
+            onImportTapped: {},
+            onSettingsTapped: {}
         )
     }
 }

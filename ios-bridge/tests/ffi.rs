@@ -13,7 +13,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use flate2::read::GzDecoder;
-use ios_bridge::{cs2_last_error, cs2_parse_file, cs2_string_free};
+use ios_bridge::{cs2_bridge_version, cs2_last_error, cs2_parse_file, cs2_string_free};
 
 fn sample_demo_path() -> Option<PathBuf> {
     let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -109,4 +109,10 @@ fn null_path_is_an_invalid_argument_not_a_crash() {
 
     assert_eq!(status, 1, "expected Cs2Status::InvalidArgument (1)");
     assert!(take_last_error().is_some());
+}
+
+#[test]
+fn bridge_version_matches_cargo_toml() {
+    let version = unsafe { CStr::from_ptr(cs2_bridge_version()) }.to_str().unwrap();
+    assert_eq!(version, env!("CARGO_PKG_VERSION"));
 }

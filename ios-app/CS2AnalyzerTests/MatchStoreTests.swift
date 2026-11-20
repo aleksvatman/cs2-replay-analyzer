@@ -8,10 +8,10 @@ final class MatchStoreTests: XCTestCase {
         return MatchStore(rootDirectory: tempDir)
     }
 
-    private func makeMeta(id: String, lastOpenedAt: Date = Date()) -> CachedMatchMeta {
+    private func makeMeta(id: String, lastOpenedAt: Date = Date(), sizeBytes: Int = 123) -> CachedMatchMeta {
         CachedMatchMeta(
             id: id, map: "de_mirage", scoreT: 8, scoreCT: 2, roundsCount: 10, playersCount: 10,
-            schemaVersion: supportedSchemaVersion, parsedAt: Date(), lastOpenedAt: lastOpenedAt, sizeBytes: 123
+            schemaVersion: supportedSchemaVersion, parsedAt: Date(), lastOpenedAt: lastOpenedAt, sizeBytes: sizeBytes
         )
     }
 
@@ -62,6 +62,39 @@ final class MatchStoreTests: XCTestCase {
         store.delete(id: "abc")
 
         XCTAssertNil(store.meta(for: "abc"))
+    }
+
+    func testTotalSizeBytesSumsAllCachedMatches() throws {
+        let store = makeStore()
+        let gz = try MatchModelTestsHelpers.sampleMirageGzipped()
+        try store.store(id: "a", gzippedJSON: gz, meta: makeMeta(id: "a", sizeBytes: 100))
+        try store.store(id: "b", gzippedJSON: gz, meta: makeMeta(id: "b", sizeBytes: 200))
+
+        XCTAssertEqual(store.totalSizeBytes, 300)
+    }
+
+    func testEnforceSizeLimitDeletesOldestFirst() throws {
+        let store = makeStore()
+        let gz = try MatchModelTestsHelpers.sampleMirageGzipped()
+        try store.store(id: "oldest", gzippedJSON: gz, meta: makeMeta(id: "oldest", lastOpenedAt: Date(timeIntervalSinceNow: -200), sizeBytes: 100))
+        try store.store(id: "middle", gzippedJSON: gz, meta: makeMeta(id: "middle", lastOpenedAt: Date(timeIntervalSinceNow: -100), sizeBytes: 100))
+        try store.store(id: "newest", gzippedJSON: gz, meta: makeMeta(id: "newest", lastOpenedAt: Date(), sizeBytes: 100))
+
+        store.enforceSizeLimit(maxBytes: 250)
+
+        XCTAssertNil(store.meta(for: "oldest"))
+        XCTAssertNotNil(store.meta(for: "middle"))
+        XCTAssertNotNil(store.meta(for: "newest"))
+    }
+
+    func testEnforceSizeLimitDoesNothingWhenUnderLimit() throws {
+        let store = makeStore()
+        let gz = try MatchModelTestsHelpers.sampleMirageGzipped()
+        try store.store(id: "a", gzippedJSON: gz, meta: makeMeta(id: "a", sizeBytes: 100))
+
+        store.enforceSizeLimit(maxBytes: 1_000_000)
+
+        XCTAssertNotNil(store.meta(for: "a"))
     }
 }
 

@@ -25,8 +25,8 @@ struct CachedMatchMeta: Codable {
 /// Локальный кэш разобранных матчей (`ipad-doc.md` разд. 9): `Application Support/matches/<id>/
 /// {match.json.gz, meta.json}`, `id` — SHA-256 исходной демки, чтобы один и тот же файл не
 /// разбирался дважды. JSON хранится сжатым — декодирование остаётся быстрым даже на iPad 7
-/// (замер в I1, `summary.md`), экономия места важнее. Контроль размера кэша и ручное удаление
-/// (настройки, этап I6) сюда пока не входят — здесь только механика хранения, нужная I9.
+/// (замер в I1, `summary.md`), экономия места важнее. Лимит размера (`enforceSizeLimit`) и
+/// ручное удаление (`delete`) — этап I6, вызывает `SettingsView`/`MatchLibrary`.
 final class MatchStore {
     private let root: URL
     private let decoder: JSONDecoder = {
@@ -100,5 +100,25 @@ final class MatchStore {
 
     func delete(id: String) {
         try? FileManager.default.removeItem(at: matchDir(id))
+    }
+
+    /// Суммарный размер кэша (байты сжатого JSON, из `meta.sizeBytes` — без повторного чтения
+    /// файлов с диска).
+    var totalSizeBytes: Int {
+        listMeta().reduce(0) { $0 + $1.sizeBytes }
+    }
+
+    /// Удаляет самые старые (по `lastOpenedAt`) матчи, пока суммарный размер не уложится в
+    /// `maxBytes` (настройка «максимальный размер кэша», этап I6). Матч, открытый только что
+    /// (например, сейчас импортированный), удалится в последнюю очередь.
+    func enforceSizeLimit(maxBytes: Int) {
+        let newestFirst = listMeta()
+        var total = newestFirst.reduce(0) { $0 + $1.sizeBytes }
+        guard total > maxBytes else { return }
+        for meta in newestFirst.reversed() {
+            guard total > maxBytes else { break }
+            delete(id: meta.id)
+            total -= meta.sizeBytes
+        }
     }
 }

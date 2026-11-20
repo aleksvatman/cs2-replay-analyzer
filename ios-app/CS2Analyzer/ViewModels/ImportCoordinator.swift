@@ -9,10 +9,16 @@ enum ImportState: Equatable {
 
 /// Состояние экрана импорта демки (этап I9): следит за прогрессом `MatchLibrary.importDemo`
 /// и ошибками — сам импорт делает `MatchLibrary`, этот класс только отражает его на UI.
+/// Ошибки ещё и пишутся в `ErrorLog` (этап I6, диагностика в `SettingsView`).
 @Observable
 @MainActor
 final class ImportCoordinator {
     private(set) var state: ImportState = .idle
+    private let errorLog: ErrorLog
+
+    init(errorLog: ErrorLog = .shared) {
+        self.errorLog = errorLog
+    }
 
     func importDemo(_ url: URL, into library: MatchLibrary) async -> MatchSummary? {
         state = .parsing(ParseProgress(stage: .events, percent: 0))
@@ -25,13 +31,17 @@ final class ImportCoordinator {
             state = .idle
             return summary
         } catch {
-            state = .failed(error.localizedDescription)
+            let message = error.localizedDescription
+            state = .failed(message)
+            errorLog.append("Импорт демки: \(message)")
             return nil
         }
     }
 
     func reportPickerFailure(_ error: Error) {
-        state = .failed(error.localizedDescription)
+        let message = error.localizedDescription
+        state = .failed(message)
+        errorLog.append("Выбор файла: \(message)")
     }
 
     func dismissError() {

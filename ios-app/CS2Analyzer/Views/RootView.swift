@@ -4,10 +4,12 @@ import UniformTypeIdentifiers
 /// Слева список матчей, справа сводка матча (этап I2) или повтор раунда (I3-I4).
 struct RootView: View {
     @State private var library = MatchLibrary()
+    @State private var settings = AppSettings()
     @State private var importCoordinator = ImportCoordinator()
     @State private var selection: String?
     @State private var columnVisibility: NavigationSplitViewVisibility = .all
     @State private var isImporterPresented = false
+    @State private var isSettingsPresented = false
 
     private static let demoContentType = UTType(filenameExtension: "dem") ?? .data
 
@@ -17,7 +19,8 @@ struct RootView: View {
                 items: library.items,
                 loadErrors: library.loadErrors,
                 selection: $selection,
-                onImportTapped: { isImporterPresented = true }
+                onImportTapped: { isImporterPresented = true },
+                onSettingsTapped: { isSettingsPresented = true }
             )
         } detail: {
             if let selection, let match = library.match(for: selection) {
@@ -49,6 +52,9 @@ struct RootView: View {
         }
         .sheet(isPresented: importSheetBinding) {
             ImportProgressView(state: importCoordinator.state, onDismissError: importCoordinator.dismissError)
+        }
+        .sheet(isPresented: $isSettingsPresented) {
+            SettingsView(library: library, settings: settings)
         }
     }
 
